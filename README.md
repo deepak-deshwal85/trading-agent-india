@@ -18,13 +18,10 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 - **VADER** (fast, no GPU) — Enhanced with 50+ financial-domain terms (FII buying/selling, rate hike/cut, margin expansion, etc.)
 - **FinBERT** (optional, deep) — ProsusAI/finbert transformer model for financial-domain NLP
 
-### Fundamental Analysis
-- P/E Ratio, Forward P/E, P/B Ratio
-- EPS, ROE, Profit Margins
-- Debt-to-Equity, Revenue Growth
-- Dividend Yield, Free Cash Flow
-- 52-week high/low position, Beta
-- Automated scoring (0-100) with rating
+### Fundamental-style scoring (OpenAlgo)
+- Uses **OpenAlgo** daily history + live **quotes** (your Zerodha/broker feed — no Yahoo Finance).
+- 52-week range, price momentum (~6M), volume vs 20-day average, plus optional AI context.
+- Classic P/E, ROE, etc. are **not** available from the broker API here; scoring is **market-data-driven**.
 
 ### Technical Analysis
 - **Moving Averages**: SMA(20), SMA(50), EMA(12), EMA(26), Golden/Death Cross detection
@@ -54,8 +51,10 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 
 ### Prerequisites
 - Python 3.10+
-- Internet connection (for live data)
-- Anthropic API key and/or OpenAI API key (for AI features)
+- **[OpenAlgo](https://docs.openalgo.in)** running (e.g. `http://127.0.0.1:5000`) with broker (e.g. Zerodha) connected
+- `OPENALGO_API_KEY` from the OpenAlgo app (required for prices & history)
+- Internet connection (news + AI)
+- Anthropic and/or OpenAI API key (optional, for `--ai`)
 
 ### Installation
 
@@ -78,7 +77,17 @@ OPENAI_API_KEY=sk-proj-...
 # Optional model overrides
 # ANTHROPIC_MODEL=claude-sonnet-4-20250514
 # OPENAI_MODEL=gpt-4o
+
+# OpenAlgo (market data)
+OPENALGO_API_KEY=your_openalgo_api_key
+OPENALGO_HOST=http://127.0.0.1:5000
+OPENALGO_USERNAME=your_login_username
+OPENALGO_EXCHANGE=NSE
+# Use "db" if you rely on OpenAlgo Historify/DuckDB for daily candles
+# OPENALGO_HISTORY_SOURCE=api
 ```
+
+See also `.env.example`.
 
 ## Usage
 
@@ -106,6 +115,69 @@ python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 ### Full analysis with AI + detailed panels:
 ```bash
 python main.py --ai --detailed --stocks RELIANCE INFY TCS
+```
+
+### Export modern PDF report:
+```bash
+python main.py --ai --detailed --pdf --pdf-file reports/market_report.pdf --stocks RELIANCE INFY TCS
+```
+
+## Production Run Commands
+
+### Full Nifty50 run (AI + PDF, dated filename)
+**PowerShell**
+```powershell
+$ts = Get-Date -Format "yyyyMMdd_HHmm"
+python main.py --ai --provider openai --pdf --pdf-file "reports/nifty50_$ts.pdf" --top 20
+```
+
+### Faster run (skip market news fetch, still computes stocks + AI)
+```powershell
+$ts = Get-Date -Format "yyyyMMdd_HHmm"
+python main.py --ai --provider openai --skip-news --pdf --pdf-file "reports/nifty50_fast_$ts.pdf" --top 20
+```
+
+### Health check before scheduled run
+```powershell
+python -c "from openalgo_data import check_openalgo_auth; print(check_openalgo_auth())"
+```
+Expected output:
+```text
+(True, 'OpenAlgo authentication OK.')
+```
+
+### Validate symbol availability before full run
+```powershell
+# Validate Nifty50 against OpenAlgo
+python main.py --validate-symbols
+
+# Validate custom symbols
+python main.py --validate-symbols --stocks RELIANCE INFY TATAMOTORS
+```
+
+### Auto-drop missing symbols and continue run
+```powershell
+# Drop missing/unreachable symbols, continue analysis with valid symbols only
+python main.py --ai --drop-missing --pdf --pdf-file reports/market_after_drop.pdf
+```
+
+### Save validation report to CSV
+```powershell
+# Save symbol status to an explicit file
+python main.py --validate-symbols --symbol-report-csv reports/symbol_validation.csv
+
+# Auto timestamped CSV
+python main.py --validate-symbols --symbol-report-csv auto
+```
+
+### Windows Task Scheduler action example
+Program/script:
+```text
+powershell.exe
+```
+Arguments:
+```text
+-NoProfile -ExecutionPolicy Bypass -Command "$ts = Get-Date -Format 'yyyyMMdd_HHmm'; cd 'C:\Users\Swati\trading-agent-india'; python main.py --ai --provider openai --pdf --pdf-file ('reports/nifty50_'+$ts+'.pdf') --top 20"
 ```
 
 ### Use FinBERT + AI for maximum accuracy:
@@ -144,7 +216,7 @@ python main.py --skip-news --stocks RELIANCE
 │  │ World News   │  │ fundamental  │  │recommendation │             │
 │  └──────────────┘  │    .py       │  │    .py        │             │
 │                     │              │  │               │             │
-│  ┌──────────────┐  │ yfinance     │  │ Weighted      │             │
+│  ┌──────────────┐  │ OpenAlgo     │  │ Weighted      │             │
 │  │  config.py   │  │ P/E, ROE     │  │ scoring       │             │
 │  │  .env        │  │ Growth, Debt │  │ Buy/Sell/Hold │             │
 │  │              │  └──────────────┘  │ Confidence    │             │
@@ -182,7 +254,7 @@ This tool is for **educational and informational purposes only**. It does NOT co
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.10+ |
-| Stock Data | yfinance |
+| Stock Data | OpenAlgo (broker API) |
 | Technical Analysis | pandas_ta |
 | News Aggregation | feedparser, requests, BeautifulSoup |
 | Sentiment (Fast) | VADER + Financial Lexicon |

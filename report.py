@@ -372,7 +372,7 @@ def print_ai_comparison_table(recommendations: list[Recommendation],
 
 def print_footer():
     console.print(
-        "[dim]Powered by: yfinance, pandas_ta, VADER/FinBERT, Anthropic Claude / OpenAI GPT, "
+        "[dim]Powered by: OpenAlgo (broker data), pandas_ta, VADER/FinBERT, Anthropic Claude / OpenAI GPT, "
         "Google News RSS, Zerodha Pulse, ET Markets, MoneyControl, LiveMint[/dim]"
     )
     console.print("[dim]Data may be delayed. Use at your own risk.[/dim]")

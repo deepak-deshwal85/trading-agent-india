@@ -18,10 +18,12 @@ Usage:
 import argparse
 import time
 import os
+import csv
+from datetime import datetime
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from config import NIFTY_50, AI_PROVIDER
+from config import NIFTY_50, AI_PROVIDER, OPENALGO_API_KEY
 from news_fetcher import (
     fetch_all_market_news, fetch_world_news,
     fetch_stock_specific_news, NewsItem,
@@ -34,6 +36,8 @@ from ai_analyzer import (
     analyze_stock_with_ai, generate_market_overview,
     AIInsight, MarketOverview,
 )
+from pdf_report import generate_pdf_report
+from openalgo_data import check_openalgo_auth, validate_symbols
 from report import (
     console, print_header, print_market_sentiment,
     print_top_news, print_recommendation_summary,
@@ -77,6 +81,26 @@ def parse_args():
         "--skip-news", action="store_true",
         help="Skip news fetching (faster re-runs for testing).",
     )
+    parser.add_argument(
+        "--pdf", action="store_true",
+        help="Export report as a modern PDF file.",
+    )
+    parser.add_argument(
+        "--pdf-file", type=str, default="market_report.pdf",
+        help="Output PDF file path (default: market_report.pdf).",
+    )
+    parser.add_argument(
+        "--validate-symbols", action="store_true",
+        help="Validate symbols against OpenAlgo and exit (no analysis run).",
+    )
+    parser.add_argument(
+        "--drop-missing", action="store_true",
+        help="Validate symbols first and auto-drop missing/unreachable symbols from analysis.",
+    )
+    parser.add_argument(
+        "--symbol-report-csv", type=str, default=None,
+        help="Optional CSV path to save symbol validation result (status per symbol).",
+    )
     return parser.parse_args()
 
 
@@ -96,9 +120,77 @@ def main():
     use_finbert = args.finbert
     use_ai = args.ai
 
+    def _write_symbol_report_csv(path: str, base_symbols: list[str], result: dict[str, list[str]]):
+        rows = []
+        status_map = {}
+        for s in result.get("ok", []):
+            status_map[s] = "ok"
+        for s in result.get("missing", []):
+            status_map[s] = "missing"
+        for s in result.get("unreachable", []):
+            status_map[s] = "unreachable"
+        for s in base_symbols:
+            rows.append({"symbol": s, "status": status_map.get(s, "unknown")})
+
+        out_path = path
+        if out_path.lower() == "auto":
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            out_path = f"reports/symbol_validation_{ts}.csv"
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["symbol", "status"])
+            writer.writeheader()
+            writer.writerows(rows)
+        console.print(f"[green]Symbol validation CSV saved:[/] {os.path.abspath(out_path)}")
+
     provider_name = args.provider or AI_PROVIDER
     if use_ai:
         console.print(f"[bold bright_magenta]AI Mode: ON  |  Provider: {provider_name.upper()}[/]\n")
+
+    if not OPENALGO_API_KEY:
+        console.print(
+            "[bold red]OPENALGO_API_KEY is missing in .env.[/] "
+            "Market data (technicals, fundamentals, PDF sparklines) requires a running OpenAlgo server and API key.\n"
+        )
+    else:
+        ok, msg = check_openalgo_auth()
+        if not ok:
+            console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
+
+        if args.validate_symbols or args.drop_missing:
+            console.print("[bold cyan]OpenAlgo Symbol Validation[/bold cyan]")
+            result = validate_symbols(symbols)
+            ok_syms = result["ok"]
+            missing_syms = result["missing"]
+            bad_syms = result["unreachable"]
+
+            console.print(
+                f"[green]Valid:[/] {len(ok_syms)}  "
+                f"[yellow]Missing:[/] {len(missing_syms)}  "
+                f"[red]Unreachable/Error:[/] {len(bad_syms)}"
+            )
+            if missing_syms:
+                console.print("[yellow]Missing symbols:[/] " + ", ".join(missing_syms))
+            if bad_syms:
+                console.print("[red]Unreachable/Error symbols:[/] " + ", ".join(bad_syms))
+                console.print(
+                    "[dim]Hint: If many symbols are unreachable, refresh broker access token in OpenAlgo dashboard.[/dim]"
+                )
+            if args.symbol_report_csv:
+                _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
+
+            if args.validate_symbols:
+                return
+
+            if args.drop_missing:
+                symbols = ok_syms
+                if not symbols:
+                    console.print("[bold red]No valid symbols left after dropping missing/unreachable symbols.[/bold red]")
+                    return
+                console.print(f"[green]Proceeding with {len(symbols)} valid symbols after drop.[/green]\n")
 
     print_header()
     print_disclaimer()
@@ -265,6 +357,7 @@ def main():
         display_recs.sort(key=lambda r: r.composite_score, reverse=True)
         print_recommendation_summary(display_recs)
     else:
+        display_recs = recommendations
         print_recommendation_summary(recommendations)
 
     if ai_insights:
@@ -280,6 +373,19 @@ def main():
             if rec.symbol in ai_insights:
                 print_ai_stock_insight(ai_insights[rec.symbol])
             console.print()
+
+    if args.pdf:
+        pdf_path = generate_pdf_report(
+            output_path=args.pdf_file,
+            recommendations=display_recs,
+            market_sentiment=market_sentiment_agg,
+            world_sentiment=world_sentiment_agg,
+            market_news=market_news,
+            world_news=world_news,
+            ai_insights=ai_insights,
+            market_overview=market_overview,
+        )
+        console.print(f"[bold green]PDF exported:[/] {pdf_path}")
 
     # ── Timing ──
     elapsed = time.time() - start_time

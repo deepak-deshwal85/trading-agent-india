@@ -4,18 +4,18 @@ Computes RSI, MACD, Moving Averages, Bollinger Bands, Volume analysis.
 """
 
 import math
-import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 from dataclasses import dataclass
 from typing import Optional
 
 from config import (
-    yf_ticker, TECHNICAL_PERIOD_DAYS,
+    TECHNICAL_PERIOD_DAYS,
     SMA_SHORT, SMA_LONG, EMA_SHORT, EMA_LONG,
     RSI_PERIOD, BOLLINGER_PERIOD, BOLLINGER_STD,
     MACD_FAST, MACD_SLOW, MACD_SIGNAL,
 )
+from openalgo_data import fetch_daily_history
 
 
 @dataclass
@@ -78,10 +78,9 @@ def _safe_float(val) -> Optional[float]:
 def fetch_technical(symbol: str) -> Optional[TechnicalData]:
     """Compute technical indicators for a stock."""
     try:
-        ticker = yf.Ticker(yf_ticker(symbol))
-        df = ticker.history(period="1y")
+        df = fetch_daily_history(symbol, days=TECHNICAL_PERIOD_DAYS + 60)
 
-        if df.empty or len(df) < 50:
+        if df is None or df.empty or len(df) < 50:
             return None
 
         df = df.dropna(subset=["Close"])
@@ -125,7 +124,7 @@ def fetch_technical(symbol: str) -> Optional[TechnicalData]:
             data.rsi = _safe_float(rsi.iloc[-1])
             if data.rsi is not None and data.rsi > 70:
                 data.rsi_signal = "Overbought"
-            elif data.rsi < 30:
+            elif data.rsi is not None and data.rsi < 30:
                 data.rsi_signal = "Oversold"
             else:
                 data.rsi_signal = "Neutral"
