@@ -10,6 +10,7 @@ from typing import Optional
 from config import (
     AI_PROVIDER, ANTHROPIC_API_KEY, OPENAI_API_KEY,
     ANTHROPIC_MODEL, OPENAI_MODEL,
+    ADX_GATE_THRESHOLD,
 )
 from recommendation import Recommendation
 from fundamental import FundamentalData
@@ -93,13 +94,19 @@ def _build_stock_prompt(
             f"  Current Price: ₹{technical.current_price:,.2f}\n"
             f"  SMA20: {technical.sma_20} (Price {technical.price_vs_sma20})\n"
             f"  SMA50: {technical.sma_50} (Price {technical.price_vs_sma50})\n"
+            f"  EMA9: {technical.ema_9} | EMA21: {technical.ema_21}\n"
             f"  Golden Cross: {technical.golden_cross} | Death Cross: {technical.death_cross}\n"
             f"  RSI: {technical.rsi} ({technical.rsi_signal})\n"
+            f"  Stochastic: K={technical.stoch_k} D={technical.stoch_d} ({technical.stoch_signal})\n"
             f"  MACD: {technical.macd_value} | Signal: {technical.macd_signal_line} ({technical.macd_signal_type})\n"
             f"  MACD Histogram: {technical.macd_histogram}\n"
             f"  Bollinger: Lower={technical.bb_lower} Mid={technical.bb_middle} Upper={technical.bb_upper} ({technical.bb_signal})\n"
+            f"  ATR(14): {technical.atr_14}\n"
+            f"  Supertrend: {technical.supertrend} ({technical.supertrend_direction})\n"
             f"  Volume: Latest={technical.latest_volume} Avg20d={technical.avg_volume_20d} ({technical.volume_signal})\n"
-            f"  ADX: {technical.adx} ({technical.trend_strength})\n"
+            f"  OBV: {technical.obv} ({technical.obv_signal})\n"
+            f"  ADX: {technical.adx} ({technical.trend_strength}) | Oscillator gate: "
+            f"{'ADX>' + str(ADX_GATE_THRESHOLD) + ' (momentum trusted)' if technical.adx_momentum_gate else 'ADX≤' + str(ADX_GATE_THRESHOLD) + ' (momentum damped in score)'}\n"
             f"  Technical Score: {technical.score}/100 ({technical.rating})\n"
             f"  Signals: {technical.signals_summary}\n"
         )

@@ -54,14 +54,23 @@ LIVEMINT_RSS = "https://www.livemint.com/rss/markets"
 TECHNICAL_PERIOD_DAYS = 365       # 1 year of price history for technicals
 SMA_SHORT = 20
 SMA_LONG = 50
-EMA_SHORT = 12
-EMA_LONG = 26
+# Fast EMA pair for price signals (distinct from MACD’s 12/26 inputs)
+EMA_SHORT = 9
+EMA_LONG = 21
 RSI_PERIOD = 14
 BOLLINGER_PERIOD = 20
 BOLLINGER_STD = 2
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
+ATR_PERIOD = 14
+STOCH_K = 14
+STOCH_D = 3
+STOCH_SMOOTH_K = 3
+SUPERTREND_LENGTH = 7
+SUPERTREND_MULTIPLIER = 3
+# Indian markets: gate oscillator signals when ADX is below this (ranging regime)
+ADX_GATE_THRESHOLD = 25
 
 # ── Sentiment Thresholds ─────────────────────────────────────────────────────
 SENTIMENT_BULLISH_THRESHOLD = 0.15

@@ -6,7 +6,12 @@ to produce Buy / Sell / Hold recommendations with confidence scores.
 from dataclasses import dataclass
 from typing import Optional
 
-from config import WEIGHT_SENTIMENT, WEIGHT_FUNDAMENTAL, WEIGHT_TECHNICAL
+from config import (
+    WEIGHT_SENTIMENT,
+    WEIGHT_FUNDAMENTAL,
+    WEIGHT_TECHNICAL,
+    ADX_GATE_THRESHOLD,
+)
 from sentiment import SentimentResult
 from fundamental import FundamentalData
 from technical import TechnicalData
@@ -160,15 +165,48 @@ def generate_recommendation(
         elif technical.death_cross:
             bear_case.append("Death Cross (SMA20 < SMA50)")
 
+        if technical.supertrend_direction == "Bullish":
+            bull_case.append("Supertrend bullish (ATR-based trend line)")
+        elif technical.supertrend_direction == "Bearish":
+            bear_case.append("Supertrend bearish")
+
+        if technical.obv_signal == "Accumulation":
+            bull_case.append("OBV accumulation vs price (possible smart-money buying)")
+        elif technical.obv_signal == "Distribution":
+            bear_case.append("OBV distribution vs price (possible distribution)")
+
+        gate = technical.adx_momentum_gate
+
         if technical.rsi_signal == "Oversold":
-            bull_case.append(f"RSI oversold ({technical.rsi}) - potential bounce")
+            msg = f"RSI oversold ({technical.rsi}) - potential bounce"
+            bull_case.append(
+                msg + (f" (ADX>{ADX_GATE_THRESHOLD} confirms trend)" if gate else "")
+            )
         elif technical.rsi_signal == "Overbought":
-            bear_case.append(f"RSI overbought ({technical.rsi}) - potential pullback")
+            msg = f"RSI overbought ({technical.rsi}) - potential pullback"
+            bear_case.append(
+                msg + (f" (ADX>{ADX_GATE_THRESHOLD} confirms trend)" if gate else "")
+            )
+
+        if technical.stoch_signal == "Oversold":
+            bull_case.append(
+                f"Stochastic oversold (K={technical.stoch_k})"
+                + (f" — active with ADX>{ADX_GATE_THRESHOLD}" if gate else "")
+            )
+        elif technical.stoch_signal == "Overbought":
+            bear_case.append(
+                f"Stochastic overbought (K={technical.stoch_k})"
+                + (f" — active with ADX>{ADX_GATE_THRESHOLD}" if gate else "")
+            )
 
         if technical.macd_signal_type == "Bullish":
-            bull_case.append("MACD bullish crossover")
+            bull_case.append(
+                "MACD bullish crossover" + (f" (ADX>{ADX_GATE_THRESHOLD})" if gate else "")
+            )
         elif technical.macd_signal_type == "Bearish":
-            bear_case.append("MACD bearish crossover")
+            bear_case.append(
+                "MACD bearish crossover" + (f" (ADX>{ADX_GATE_THRESHOLD})" if gate else "")
+            )
 
         if technical.bb_signal == "Oversold":
             bull_case.append("Below Bollinger lower band (oversold)")
@@ -184,6 +222,13 @@ def generate_recommendation(
             key_levels["Bollinger Lower (Support)"] = technical.bb_lower
         if technical.bb_upper:
             key_levels["Bollinger Upper (Resistance)"] = technical.bb_upper
+        if technical.supertrend is not None:
+            key_levels["Supertrend"] = technical.supertrend
+        if technical.atr_14 is not None and technical.current_price:
+            key_levels["ATR14 (volatility, ₹)"] = round(technical.atr_14, 2)
+            key_levels["Approx 2×ATR stop (₹ from spot)"] = round(
+                2.0 * technical.atr_14, 2
+            )
     if fundamental:
         if fundamental.fifty_two_week_low:
             key_levels["52-Week Low"] = fundamental.fifty_two_week_low

@@ -24,13 +24,13 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 - Classic P/E, ROE, etc. are **not** available from the broker API here; scoring is **market-data-driven**.
 
 ### Technical Analysis
-- **Moving Averages**: SMA(20), SMA(50), EMA(12), EMA(26), Golden/Death Cross detection
-- **RSI**: Overbought/Oversold signals
-- **MACD**: Bullish/Bearish crossover detection
-- **Bollinger Bands**: Band position analysis
-- **Volume Analysis**: 20-day average comparison
-- **ADX**: Trend strength measurement
-- Automated scoring (0-100) with rating
+- **Trend**: SMA(20), SMA(50), Golden/Death Cross; **EMA(9)** & **EMA(21)** (fast pair; MACD still uses 12/26 internally)
+- **Momentum**: RSI(14), **Stochastic (14,3,3)**, MACD (12,26,9) line / signal / histogram
+- **Volatility**: Bollinger Bands(20,2), **ATR(14)**
+- **Volume**: Latest vs **20-day average**; **OBV** with accumulation/distribution-style read
+- **Trend line**: **Supertrend** (configurable length × ATR mult; default 7, 3)
+- **ADX**(14): Trend strength; **oscillator signals are damped when ADX ≤ 25** (ranging regime; NSE/BSE-style gate)
+- **Technical score (0–100)**: weighted blend — trend **30%**, momentum **30%**, volatility **15%**, volume **15%**, ADX bucket **10%** — plus Buy/Sell/Neutral-style rating
 
 ### AI-Powered Deep Analysis (NEW)
 - **Configurable provider** — Switch between Anthropic Claude and OpenAI GPT via `.env`
@@ -225,10 +225,10 @@ python main.py --skip-news --stocks RELIANCE
 │  │ Nifty 50     │  │  technical   │  ┌───────────────┐             │
 │  │ Parameters   │  │    .py       │  │ ai_analyzer   │             │
 │  └──────────────┘  │              │  │    .py        │             │
-│                     │ RSI, MACD    │  │               │             │
-│                     │ SMA, EMA     │  │ Claude / GPT  │             │
-│                     │ Bollinger    │  │ Market view   │             │
-│                     │ Volume, ADX  │  │ Stock thesis  │             │
+│                     │ RSI, Stoch,  │  │               │             │
+│                     │ MACD, BB,    │  │ Claude / GPT  │             │
+│                     │ ATR, OBV,    │  │ Market view   │             │
+│                     │ Supertrend   │  │ Stock thesis  │             │
 │                     └──────────────┘  │ Targets       │             │
 │                                       └───────────────┘             │
 └─────────────────────────────────────────────────────────────────────┘
