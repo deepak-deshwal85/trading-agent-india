@@ -76,6 +76,18 @@ ADX_GATE_THRESHOLD = 25
 SENTIMENT_BULLISH_THRESHOLD = 0.15
 SENTIMENT_BEARISH_THRESHOLD = -0.15
 
+# Ensemble (--finbert): confidence-weighted FinBERT + VADER; optional FinBERT-Tone
+# Weights sum to 1.0. If FinBERT-Tone is disabled or fails to load, Prosus weight
+# absorbs the tone share (see sentiment._ensemble_weights).
+SENTIMENT_USE_FINBERT_TONE = os.getenv("SENTIMENT_USE_FINBERT_TONE", "true").lower() in (
+    "1", "true", "yes",
+)
+SENTIMENT_ENSEMBLE_VADER = float(os.getenv("SENTIMENT_ENSEMBLE_VADER", "0.30"))
+SENTIMENT_ENSEMBLE_PROSUS = float(os.getenv("SENTIMENT_ENSEMBLE_PROSUS", "0.45"))
+SENTIMENT_ENSEMBLE_TONE = float(os.getenv("SENTIMENT_ENSEMBLE_TONE", "0.25"))
+# Recency: exp(-ln(2) * hours_old / half_life) — 24h → 50% weight
+SENTIMENT_RECENCY_HALF_LIFE_HOURS = float(os.getenv("SENTIMENT_RECENCY_HALF_LIFE_HOURS", "24"))
+
 # ── Recommendation Weights ────────────────────────────────────────────────────
 WEIGHT_SENTIMENT = 0.25
 WEIGHT_FUNDAMENTAL = 0.40

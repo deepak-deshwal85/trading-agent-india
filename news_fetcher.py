@@ -2,10 +2,11 @@
 News aggregation from multiple Indian and global financial sources.
 """
 
+import time
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 from dataclasses import dataclass, field
 
@@ -25,6 +26,8 @@ class NewsItem:
     summary: str = ""
     related_stocks: list = field(default_factory=list)
     category: str = "general"  # general | stock_specific | world
+    # Parsed from RSS published_parsed when available (UTC); used for recency decay
+    published_at: Optional[datetime] = None
 
 
 def _parse_rss(url: str, source_name: str, category: str = "general",
@@ -36,6 +39,13 @@ def _parse_rss(url: str, source_name: str, category: str = "general",
             title = entry.get("title", "")
             summary_raw = entry.get("summary", entry.get("description", ""))
             summary = BeautifulSoup(summary_raw, "html.parser").get_text(strip=True)
+            published_at = None
+            pp = entry.get("published_parsed")
+            if pp:
+                try:
+                    published_at = datetime.fromtimestamp(time.mktime(pp), tz=timezone.utc)
+                except (OverflowError, OSError, ValueError):
+                    published_at = None
             items.append(NewsItem(
                 title=title,
                 source=source_name,
@@ -43,6 +53,7 @@ def _parse_rss(url: str, source_name: str, category: str = "general",
                 published=entry.get("published", ""),
                 summary=summary[:500],
                 category=category,
+                published_at=published_at,
             ))
         return items
     except Exception as e:

@@ -12,7 +12,7 @@ Usage:
     python main.py --ai --provider openai            # Use OpenAI instead
     python main.py --ai --detailed                   # AI + detailed per-stock panels
     python main.py --top 10                          # Show top/bottom 10 only
-    python main.py --finbert                         # FinBERT sentiment model
+    python main.py --finbert                         # Ensemble: VADER + FinBERT (+ optional Tone)
 """
 
 import argparse
@@ -63,7 +63,7 @@ def parse_args():
     )
     parser.add_argument(
         "--finbert", action="store_true",
-        help="Use FinBERT model for sentiment (slower, more accurate).",
+        help="Use ensemble sentiment: VADER + ProsusAI FinBERT (+ FinBERT-Tone if available).",
     )
     parser.add_argument(
         "--ai", action="store_true",
@@ -234,7 +234,7 @@ def main():
     # PHASE 2: Sentiment Analysis
     # ══════════════════════════════════════════════════════════════════════════
     console.print("[bold cyan]Phase 2: Sentiment Analysis[/bold cyan]")
-    mode_label = "FinBERT" if use_finbert else "VADER"
+    mode_label = "Ensemble (VADER + FinBERT)" if use_finbert else "VADER"
     console.print(f"[dim]  Using {mode_label} model...[/dim]")
 
     market_sentiments = analyze_news_sentiment(market_news, use_finbert=use_finbert)
