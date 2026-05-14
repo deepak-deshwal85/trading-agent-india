@@ -39,6 +39,12 @@ NIFTY_50 = [
     "WIPRO",
 ]
 
+# ── Broker holdings (python main.py --holdings) via OpenAlgo ────────────────
+# When true, merge open positions from positionbook() with demat holdings().
+HOLDINGS_INCLUDE_OPENALGO_POSITIONS = os.getenv(
+    "HOLDINGS_INCLUDE_OPENALGO_POSITIONS", "true"
+).lower() in ("1", "true", "yes")
+
 # ── News Source Configuration ─────────────────────────────────────────────────
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
 GOOGLE_NEWS_MARKET_RSS = "https://news.google.com/rss/search?q=indian+stock+market+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en"

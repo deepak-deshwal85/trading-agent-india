@@ -65,10 +65,16 @@ def _sentiment_color(label: str) -> str:
     return {"Bullish": "green", "Bearish": "red", "Neutral": "yellow"}.get(label, "white")
 
 
-def print_header():
+def print_header(holdings_mode: bool = False, holdings_source: str | None = None):
     header = Text()
     header.append("  INDIAN MARKET STOCK ADVISORY SYSTEM  ", style="bold white on blue")
     header.append("\n")
+    if holdings_mode and holdings_source:
+        header.append("  Mode: Portfolio holdings analysis  ", style="bold cyan")
+        header.append("\n")
+        header.append("  Source: ", style="dim")
+        header.append(f"{holdings_source}  ", style="dim italic")
+        header.append("\n")
     header.append(f"  Report Generated: {datetime.now().strftime('%d %B %Y, %I:%M %p IST')}  ",
                   style="dim")
     console.print(Panel(header, border_style="blue", box=box.DOUBLE))
@@ -117,9 +123,13 @@ def print_top_news(news_items: list[NewsItem], title: str = "Top Market Headline
     console.print()
 
 
-def print_recommendation_summary(recommendations: list[Recommendation]):
+def print_recommendation_summary(
+    recommendations: list[Recommendation],
+    *,
+    title: str | None = None,
+):
     table = Table(
-        title="STOCK RECOMMENDATIONS SUMMARY",
+        title=title or "STOCK RECOMMENDATIONS SUMMARY",
         box=box.HEAVY_HEAD, border_style="bright_blue",
         title_style="bold bright_white on blue",
         caption="Scores: 0-100 | Weights: Sentiment 25%, Fundamental 40%, Technical 35%",

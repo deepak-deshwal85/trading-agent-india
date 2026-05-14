@@ -15,6 +15,7 @@ from config import (
     OPENALGO_HOST,
     OPENALGO_EXCHANGE,
     OPENALGO_HISTORY_SOURCE,
+    HOLDINGS_INCLUDE_OPENALGO_POSITIONS,
 )
 
 _client: Any = None
@@ -225,6 +226,134 @@ def fetch_quote(symbol: str) -> Optional[dict[str, Any]]:
     except Exception as e:
         print(f"  [warn] OpenAlgo quotes error for {symbol}: {e}")
         return None
+
+
+def _holdings_rows_from_response(res: dict) -> list[dict]:
+    """Normalize OpenAlgo holdings() JSON to a list of row dicts."""
+    if not isinstance(res, dict) or res.get("status") != "success":
+        return []
+    data = res.get("data")
+    if isinstance(data, dict):
+        h = data.get("holdings")
+        if isinstance(h, list):
+            return [r for r in h if isinstance(r, dict)]
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    return []
+
+
+def _positionbook_rows_from_response(res: dict) -> list[dict]:
+    if not isinstance(res, dict) or res.get("status") != "success":
+        return []
+    data = res.get("data")
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    return []
+
+
+def _exchange_matches(row_exchange: Any, wanted: str) -> bool:
+    if not wanted:
+        return True
+    if row_exchange is None or row_exchange == "":
+        return True
+    return str(row_exchange).upper() == str(wanted).upper()
+
+
+def _holding_like_nonzero(row: dict) -> bool:
+    """True if any size field suggests a non-flat holding/position."""
+    for key in (
+        "quantity",
+        "t1_quantity",
+        "collateral_quantity",
+        "quantity_available",
+        "opening_quantity",
+        "sell_quantity",
+    ):
+        if key not in row:
+            continue
+        try:
+            if abs(float(row[key] or 0)) > 1e-9:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _broker_symbol_from_row(row: dict) -> str | None:
+    raw = row.get("symbol") or row.get("tradingsymbol")
+    if raw is None:
+        return None
+    s = str(raw).strip().upper()
+    if not s:
+        return None
+    for suf in ("-EQ", "-BE", "-BZ", "-SM", "-ST"):
+        if s.endswith(suf):
+            return s[: -len(suf)]
+    if "-" in s and len(s) <= 20:
+        left, right = s.rsplit("-", 1)
+        if right in ("EQ", "BE", "BZ", "SM", "ST"):
+            return left
+    return s
+
+
+def fetch_broker_holdings_symbols(
+    *,
+    exchange: str | None = None,
+    include_position_book: bool | None = None,
+) -> list[str]:
+    """
+    Load unique symbols from the connected broker via OpenAlgo.
+
+    Uses ``holdings()`` (demat / long-term holdings). Optionally merges
+    ``positionbook()`` (open MIS/NRML/F&O legs) when
+    ``HOLDINGS_INCLUDE_OPENALGO_POSITIONS`` is true or ``include_position_book`` is true.
+
+    Raises:
+        RuntimeError: API key missing or OpenAlgo/broker returned an error
+        ValueError: empty portfolio
+    """
+    use_pb = (
+        HOLDINGS_INCLUDE_OPENALGO_POSITIONS
+        if include_position_book is None
+        else include_position_book
+    )
+    exch = exchange or OPENALGO_EXCHANGE
+    client = get_openalgo_client()
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def _add_row(row: dict) -> None:
+        if not _exchange_matches(row.get("exchange"), exch):
+            return
+        if not _holding_like_nonzero(row):
+            return
+        sym = _broker_symbol_from_row(row)
+        if not sym or sym in seen:
+            return
+        seen.add(sym)
+        ordered.append(sym)
+
+    h_res = client.holdings()
+    if isinstance(h_res, dict) and h_res.get("status") != "success":
+        msg = h_res.get("message", h_res)
+        raise RuntimeError(f"OpenAlgo holdings() failed: {msg}")
+    for row in _holdings_rows_from_response(h_res if isinstance(h_res, dict) else {}):
+        _add_row(row)
+
+    if use_pb:
+        p_res = client.positionbook()
+        if isinstance(p_res, dict) and p_res.get("status") == "success":
+            for row in _positionbook_rows_from_response(p_res):
+                _add_row(row)
+
+    if not ordered:
+        raise ValueError(
+            "OpenAlgo returned no holdings or positions for this exchange. "
+            "Confirm the broker session in OpenAlgo, instruments sync, and that "
+            f"OPENALGO_EXCHANGE ({exch}) matches your account."
+        )
+    return ordered
 
 
 def validate_symbols(symbols: list[str]) -> dict[str, list[str]]:

@@ -13,6 +13,7 @@ Usage:
     python main.py --ai --detailed                   # AI + detailed per-stock panels
     python main.py --top 10                          # Show top/bottom 10 only
     python main.py --finbert                         # Ensemble: VADER + FinBERT (+ optional Tone)
+    python main.py --holdings                       # Symbols from your broker via OpenAlgo
 """
 
 import argparse
@@ -23,7 +24,12 @@ from datetime import datetime
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from config import NIFTY_50, AI_PROVIDER, OPENALGO_API_KEY
+from config import (
+    NIFTY_50,
+    AI_PROVIDER,
+    OPENALGO_API_KEY,
+    HOLDINGS_INCLUDE_OPENALGO_POSITIONS,
+)
 from news_fetcher import (
     fetch_all_market_news, fetch_world_news,
     fetch_stock_specific_news, NewsItem,
@@ -37,7 +43,7 @@ from ai_analyzer import (
     AIInsight, MarketOverview,
 )
 from pdf_report import generate_pdf_report
-from openalgo_data import check_openalgo_auth, validate_symbols
+from openalgo_data import check_openalgo_auth, validate_symbols, fetch_broker_holdings_symbols
 from report import (
     console, print_header, print_market_sentiment,
     print_top_news, print_recommendation_summary,
@@ -55,7 +61,14 @@ def parse_args():
     parser.add_argument(
         "--stocks", nargs="+", default=None,
         help="Specific stock symbols to analyze (e.g., RELIANCE INFY TCS). "
-             "Defaults to all Nifty 50.",
+             "Defaults to all Nifty 50 unless --holdings is used.",
+    )
+    parser.add_argument(
+        "--holdings",
+        action="store_true",
+        help="Analyze symbols from your broker via OpenAlgo (holdings(); optionally "
+             "positionbook() when HOLDINGS_INCLUDE_OPENALGO_POSITIONS=true). "
+             "Requires OPENALGO_API_KEY. Incompatible with --stocks.",
     )
     parser.add_argument(
         "--top", type=int, default=None,
@@ -101,7 +114,10 @@ def parse_args():
         "--symbol-report-csv", type=str, default=None,
         help="Optional CSV path to save symbol validation result (status per symbol).",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.stocks and args.holdings:
+        parser.error("Choose either --stocks SYMBOLS … or --holdings, not both.")
+    return args
 
 
 def main():
@@ -116,7 +132,40 @@ def main():
         import ai_analyzer
         ai_analyzer.AI_PROVIDER = args.provider  # noqa — runtime override
 
-    symbols = args.stocks if args.stocks else NIFTY_50
+    holdings_source: str | None = None
+    if args.holdings:
+        if not OPENALGO_API_KEY:
+            console.print(
+                "[bold red]--holdings requires OPENALGO_API_KEY in .env[/] "
+                "and a running OpenAlgo server with an active broker session.\n"
+            )
+            return
+        try:
+            symbols = fetch_broker_holdings_symbols()
+        except RuntimeError as e:
+            console.print(f"[bold red]{e}[/bold red]")
+            return
+        except ValueError as e:
+            console.print(f"[bold red]{e}[/bold red]")
+            return
+        except Exception as e:
+            console.print(f"[bold red]Could not load broker holdings from OpenAlgo:[/] {e}")
+            return
+        src_detail = (
+            "holdings + position book"
+            if HOLDINGS_INCLUDE_OPENALGO_POSITIONS
+            else "holdings only"
+        )
+        holdings_source = f"OpenAlgo broker API ({src_detail})"
+        console.print(
+            f"[bold cyan]Holdings mode (broker):[/] {len(symbols)} symbol(s) via "
+            f"[green]OpenAlgo[/green] — [dim]{src_detail}[/dim]\n"
+        )
+    elif args.stocks:
+        symbols = args.stocks
+    else:
+        symbols = NIFTY_50
+
     use_finbert = args.finbert
     use_ai = args.ai
 
@@ -192,7 +241,7 @@ def main():
                     return
                 console.print(f"[green]Proceeding with {len(symbols)} valid symbols after drop.[/green]\n")
 
-    print_header()
+    print_header(holdings_mode=holdings_source is not None, holdings_source=holdings_source)
     print_disclaimer()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -346,6 +395,10 @@ def main():
 
         console.print(f"\n[green]  AI analysis complete for {len(ai_insights)}/{len(symbols)} stocks[/green]\n")
 
+    rec_table_title = (
+        "PORTFOLIO HOLDINGS — RECOMMENDATIONS SUMMARY" if holdings_source else None
+    )
+
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 6: Generate Report
     # ══════════════════════════════════════════════════════════════════════════
@@ -355,10 +408,10 @@ def main():
         bottom_n = sorted_recs[-args.top:]
         display_recs = list({r.symbol: r for r in (top_n + bottom_n)}.values())
         display_recs.sort(key=lambda r: r.composite_score, reverse=True)
-        print_recommendation_summary(display_recs)
+        print_recommendation_summary(display_recs, title=rec_table_title)
     else:
         display_recs = recommendations
-        print_recommendation_summary(recommendations)
+        print_recommendation_summary(recommendations, title=rec_table_title)
 
     if ai_insights:
         print_ai_comparison_table(recommendations, ai_insights)
