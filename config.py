@@ -1,25 +1,75 @@
 """
 Configuration for Indian Market Stock Advisory System.
-Loads secrets from .env file — never hardcode API keys.
+- app.env  — non-secret app settings (models, thresholds); committed to git
+- .env     — secrets only (API keys, Telegram); never commit
 """
 
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+_ROOT = Path(__file__).resolve().parent
+# Defaults from app.env; .env may override any key (e.g. emergency model swap)
+load_dotenv(_ROOT / "app.env", override=False)
+load_dotenv(_ROOT / ".env", override=True)
 
-# ── AI Provider Configuration ─────────────────────────────────────────────────
-# Options: "anthropic" | "openai"
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic").lower()
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
-# ── Telegram (PDF delivery from GitHub Actions or scripts/send_telegram.py) ───
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-TELEGRAM_CAPTION = os.getenv("TELEGRAM_CAPTION", "").strip()
+def _env(key: str, default: str = "") -> str:
+    return os.getenv(key, default).strip()
+
+
+def _env_bool(key: str, default: bool = False) -> bool:
+    return _env(key, "true" if default else "false").lower() in ("1", "true", "yes")
+
+
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(_env(key, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(_env(key, str(default)))
+    except ValueError:
+        return default
+
+
+# ── AI Provider (runtime: CLI --provider anthropic | openai) ─────────────────
+AI_PROVIDER = ""
+
+# Secrets — .env only
+ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
+OPENAI_API_KEY = _env("OPENAI_API_KEY")
+
+# Models — app.env defaults; .env may override ANTHROPIC_MODEL_DEEP / legacy ANTHROPIC_MODEL
+ANTHROPIC_MODEL_FAST = _env("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5")
+ANTHROPIC_MODEL_DEEP = (
+    _env("ANTHROPIC_MODEL_DEEP")
+    or _env("ANTHROPIC_MODEL")
+    or "claude-sonnet-4-6"
+)
+OPENAI_MODEL_FAST = _env("OPENAI_MODEL_FAST", "gpt-4o-mini")
+OPENAI_MODEL_DEEP = (
+    _env("OPENAI_MODEL_DEEP")
+    or _env("OPENAI_MODEL")
+    or "gpt-4o"
+)
+
+# Back-compat aliases (deep tier)
+ANTHROPIC_MODEL = ANTHROPIC_MODEL_DEEP
+OPENAI_MODEL = OPENAI_MODEL_DEEP
+
+AI_SENTIMENT_USE_LLM = _env_bool("AI_SENTIMENT_USE_LLM", True)
+AI_SENTIMENT_BATCH_SIZE = _env_int("AI_SENTIMENT_BATCH_SIZE", 25)
+AI_SENTIMENT_MAX_TOKENS = _env_int("AI_SENTIMENT_MAX_TOKENS", 1024)
+
+# ── Telegram (.env) ───────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID")
+TELEGRAM_CAPTION = _env("TELEGRAM_CAPTION")
 
 # ── Nifty 50 Constituents (NSE Symbols) ──────────────────────────────────────
 NIFTY_50 = [
@@ -48,10 +98,9 @@ MONEYCONTROL_RSS = "https://www.moneycontrol.com/rss/marketreports.xml"
 LIVEMINT_RSS = "https://www.livemint.com/rss/markets"
 
 # ── Analysis Parameters ───────────────────────────────────────────────────────
-TECHNICAL_PERIOD_DAYS = 365       # 1 year of price history for technicals
+TECHNICAL_PERIOD_DAYS = 365
 SMA_SHORT = 20
 SMA_LONG = 50
-# Fast EMA pair for price signals (distinct from MACD’s 12/26 inputs)
 EMA_SHORT = 9
 EMA_LONG = 21
 RSI_PERIOD = 14
@@ -66,24 +115,17 @@ STOCH_D = 3
 STOCH_SMOOTH_K = 3
 SUPERTREND_LENGTH = 7
 SUPERTREND_MULTIPLIER = 3
-# Indian markets: gate oscillator signals when ADX is below this (ranging regime)
 ADX_GATE_THRESHOLD = 25
 
 # ── Sentiment Thresholds ─────────────────────────────────────────────────────
 SENTIMENT_BULLISH_THRESHOLD = 0.15
 SENTIMENT_BEARISH_THRESHOLD = -0.15
 
-# Ensemble (--finbert): confidence-weighted FinBERT + VADER; optional FinBERT-Tone
-# Weights sum to 1.0. If FinBERT-Tone is disabled or fails to load, Prosus weight
-# absorbs the tone share (see sentiment._ensemble_weights).
-SENTIMENT_USE_FINBERT_TONE = os.getenv("SENTIMENT_USE_FINBERT_TONE", "true").lower() in (
-    "1", "true", "yes",
-)
-SENTIMENT_ENSEMBLE_VADER = float(os.getenv("SENTIMENT_ENSEMBLE_VADER", "0.30"))
-SENTIMENT_ENSEMBLE_PROSUS = float(os.getenv("SENTIMENT_ENSEMBLE_PROSUS", "0.45"))
-SENTIMENT_ENSEMBLE_TONE = float(os.getenv("SENTIMENT_ENSEMBLE_TONE", "0.25"))
-# Recency: exp(-ln(2) * hours_old / half_life) — 24h → 50% weight
-SENTIMENT_RECENCY_HALF_LIFE_HOURS = float(os.getenv("SENTIMENT_RECENCY_HALF_LIFE_HOURS", "24"))
+SENTIMENT_USE_FINBERT_TONE = _env_bool("SENTIMENT_USE_FINBERT_TONE", True)
+SENTIMENT_ENSEMBLE_VADER = _env_float("SENTIMENT_ENSEMBLE_VADER", 0.30)
+SENTIMENT_ENSEMBLE_PROSUS = _env_float("SENTIMENT_ENSEMBLE_PROSUS", 0.45)
+SENTIMENT_ENSEMBLE_TONE = _env_float("SENTIMENT_ENSEMBLE_TONE", 0.25)
+SENTIMENT_RECENCY_HALF_LIFE_HOURS = _env_float("SENTIMENT_RECENCY_HALF_LIFE_HOURS", 24.0)
 
 # ── Recommendation Weights ────────────────────────────────────────────────────
 WEIGHT_SENTIMENT = 0.25
@@ -101,3 +143,13 @@ HEADERS = {
 
 MAX_NEWS_PER_SOURCE = 15
 REQUEST_TIMEOUT = 15
+
+
+def resolve_ai_model(tier: str = "deep") -> str:
+    """Return model id for CLI provider and tier: 'fast' (Haiku) or 'deep' (Sonnet)."""
+    provider = AI_PROVIDER.lower().strip()
+    if provider == "openai":
+        return OPENAI_MODEL_FAST if tier == "fast" else OPENAI_MODEL_DEEP
+    if provider == "anthropic":
+        return ANTHROPIC_MODEL_FAST if tier == "fast" else ANTHROPIC_MODEL_DEEP
+    raise RuntimeError("AI provider not set. Use --ai --provider anthropic|openai.")

@@ -8,8 +8,8 @@ investment recommendations.
 Usage:
     python main.py                                  # Analyze all Nifty 50 (VADER, no AI)
     python main.py --stocks RELIANCE INFY TCS       # Specific stocks
-    python main.py --ai                             # Enable AI deep analysis
-    python main.py --ai --provider openai            # Use OpenAI instead
+    python main.py --ai --provider anthropic          # AI via Claude (provider required)
+    python main.py --ai --provider openai           # AI via GPT
     python main.py --ai --detailed                   # AI + detailed per-stock panels
     python main.py --top 10                          # Show top/bottom 10 only
     python main.py --finbert                         # Ensemble: VADER + FinBERT (+ optional Tone)
@@ -24,15 +24,21 @@ from datetime import datetime
 from pathlib import Path
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.panel import Panel
 
+import config
 from config import (
     NIFTY_50,
-    AI_PROVIDER,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TELEGRAM_CAPTION,
 )
-from market_data import check_market_data_auth, validate_symbols
+from market_data import (
+    check_market_data_auth,
+    validate_symbols,
+    reset_fetch_reports,
+    build_market_data_report,
+)
 from news_fetcher import (
     fetch_all_market_news, fetch_world_news,
     fetch_stock_specific_news, NewsItem,
@@ -47,12 +53,11 @@ from ai_analyzer import (
 )
 from pdf_report import generate_pdf_report
 from report import (
-    console, print_header, print_market_sentiment,
-    print_top_news, print_recommendation_summary,
+    console, print_header, print_market_sentiment, print_market_data_fetch_report,
+    print_recommendation_summary,
     print_detailed_stock_report, print_buy_sell_hold_lists,
     print_disclaimer, print_footer,
     print_ai_market_overview, print_ai_stock_insight,
-    print_ai_comparison_table,
 )
 
 
@@ -75,11 +80,11 @@ def parse_args():
     )
     parser.add_argument(
         "--ai", action="store_true",
-        help="Enable AI-powered deep analysis (uses API key from .env).",
+        help="Enable AI deep analysis (requires --provider and API key in .env).",
     )
     parser.add_argument(
         "--provider", type=str, default=None, choices=["anthropic", "openai"],
-        help="Override AI_PROVIDER from .env (e.g., --provider openai).",
+        help="AI provider: anthropic or openai (required when using --ai).",
     )
     parser.add_argument(
         "--detailed", action="store_true",
@@ -114,7 +119,12 @@ def parse_args():
         "--symbol-report-csv", type=str, default=None,
         help="Optional CSV path to save symbol validation result (status per symbol).",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.ai and not args.provider:
+        parser.error("--ai requires --provider (anthropic or openai)")
+    if args.provider and not args.ai:
+        parser.error("--provider is only valid together with --ai")
+    return args
 
 
 def _send_pdf_to_telegram(pdf_path: str) -> None:
@@ -154,18 +164,18 @@ def main():
     args = parse_args()
     start_time = time.time()
 
-    # Override AI provider if specified via CLI
     if args.provider:
-        import config
-        config.AI_PROVIDER = args.provider
-        os.environ["AI_PROVIDER"] = args.provider
-        import ai_analyzer
-        ai_analyzer.AI_PROVIDER = args.provider  # noqa — runtime override
+        config.AI_PROVIDER = args.provider.lower().strip()
 
     symbols = args.stocks if args.stocks else NIFTY_50
 
     use_finbert = args.finbert
     use_ai = args.ai
+    use_llm_sentiment = (
+        use_ai
+        and config.AI_SENTIMENT_USE_LLM
+        and bool(config.AI_PROVIDER)
+    )
 
     def _write_symbol_report_csv(path: str, base_symbols: list[str], result: dict[str, list[str]]):
         rows = []
@@ -193,14 +203,9 @@ def main():
             writer.writerows(rows)
         console.print(f"[green]Symbol validation CSV saved:[/] {os.path.abspath(out_path)}")
 
-    provider_name = args.provider or AI_PROVIDER
-    if use_ai:
-        console.print(f"[bold bright_magenta]AI Mode: ON  |  Provider: {provider_name.upper()}[/]\n")
-
+    provider_name = config.AI_PROVIDER
     ok, msg = check_market_data_auth()
-    if ok:
-        console.print(f"[dim]Market data: {msg}[/dim]\n")
-    else:
+    if not ok:
         console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
 
     if args.validate_symbols or args.drop_missing:
@@ -247,65 +252,51 @@ def main():
     stock_news: dict[str, list[NewsItem]] = {}
 
     if not args.skip_news:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Fetching market news...", total=3)
-
-            console.print("[dim]  Fetching Indian market news from all sources...[/dim]")
-            market_news = fetch_all_market_news()
-            progress.update(task, advance=1)
-
-            console.print("[dim]  Fetching world/global news...[/dim]")
-            world_news = fetch_world_news()
-            progress.update(task, advance=1)
-
-            console.print(f"[dim]  Fetching stock-specific news for {len(symbols)} stocks...[/dim]")
-            stock_news = fetch_stock_specific_news(symbols)
-            progress.update(task, advance=1)
-
-        console.print(
-            f"[green]  Collected {len(market_news)} market articles, "
-            f"{len(world_news)} world articles, "
-            f"stock-specific news for {len(stock_news)} stocks[/green]\n"
-        )
+        market_news = fetch_all_market_news()
+        world_news = fetch_world_news()
+        stock_news = fetch_stock_specific_news(symbols)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 2: Sentiment Analysis
     # ══════════════════════════════════════════════════════════════════════════
-    console.print("[bold cyan]Phase 2: Sentiment Analysis[/bold cyan]")
-    mode_label = "Ensemble (VADER + FinBERT)" if use_finbert else "VADER"
-    console.print(f"[dim]  Using {mode_label} model...[/dim]")
+    if use_llm_sentiment:
+        console.print(
+            f"[bold cyan]News sentiment:[/] LLM fast model "
+            f"[dim]({config.resolve_ai_model('fast')})[/]\n"
+        )
+    elif use_ai and not config.AI_SENTIMENT_USE_LLM:
+        console.print(
+            "[dim]News sentiment: VADER/FinBERT "
+            "(AI_SENTIMENT_USE_LLM=false in app.env)[/]\n"
+        )
 
-    market_sentiments = analyze_news_sentiment(market_news, use_finbert=use_finbert)
+    market_sentiments = analyze_news_sentiment(
+        market_news, use_finbert=use_finbert, use_llm=use_llm_sentiment,
+    )
     market_sentiment_agg = aggregate_sentiment(market_sentiments)
 
-    world_sentiments = analyze_news_sentiment(world_news, use_finbert=use_finbert)
+    world_sentiments = analyze_news_sentiment(
+        world_news, use_finbert=use_finbert, use_llm=use_llm_sentiment,
+    )
     world_sentiment_agg = aggregate_sentiment(world_sentiments)
 
     stock_sentiment_aggs: dict[str, dict] = {}
     for sym in symbols:
         news_for_stock = stock_news.get(sym, [])
         if news_for_stock:
-            results = analyze_news_sentiment(news_for_stock, use_finbert=use_finbert)
+            results = analyze_news_sentiment(
+                news_for_stock, use_finbert=use_finbert, use_llm=use_llm_sentiment,
+            )
             stock_sentiment_aggs[sym] = aggregate_sentiment(results)
         else:
             stock_sentiment_aggs[sym] = aggregate_sentiment([])
 
     print_market_sentiment(market_sentiment_agg, world_sentiment_agg)
 
-    if market_news:
-        print_top_news(market_news, title="Top Indian Market Headlines", max_items=8)
-    if world_news:
-        print_top_news(world_news, title="Top World News Impacting Markets", max_items=5)
-
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 3 & 4: Fundamental + Technical Analysis
     # ══════════════════════════════════════════════════════════════════════════
+    reset_fetch_reports()
     recommendations: list[Recommendation] = []
     fundamentals: dict[str, FundamentalData] = {}
     technicals: dict[str, TechnicalData] = {}
@@ -317,13 +308,9 @@ def main():
         TextColumn("{task.completed}/{task.total}"),
         console=console,
     ) as progress:
-        task = progress.add_task(
-            "Analyzing stocks (fundamentals + technicals)...", total=len(symbols)
-        )
+        task = progress.add_task("Analyzing stocks...", total=len(symbols))
 
         for sym in symbols:
-            progress.update(task, description=f"Analyzing {sym}...")
-
             fund_data = fetch_fundamentals(sym)
             tech_data = fetch_technical(sym)
             sent_agg = stock_sentiment_aggs.get(sym, aggregate_sentiment([]))
@@ -339,27 +326,33 @@ def main():
             progress.update(task, advance=1)
 
     console.print()
+    md_summary, md_reports = build_market_data_report()
+    print_market_data_fetch_report(md_summary, md_reports)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 5: AI Deep Analysis (optional)
     # ══════════════════════════════════════════════════════════════════════════
     ai_insights: dict[str, AIInsight] = {}
     market_overview: MarketOverview | None = None
+    ai_api_errors: list[str] = []
 
     if use_ai:
-        console.print("[bold bright_magenta]Phase 5: AI Deep Analysis[/bold bright_magenta]")
-        console.print(f"[dim]  Sending data to {provider_name.upper()} for expert analysis...[/dim]\n")
-
-        # Market overview first
-        console.print("[dim]  Generating AI market overview...[/dim]")
-        market_overview = generate_market_overview(
+        console.print(
+            f"[bold bright_magenta]AI provider: {provider_name.upper()}[/] "
+            f"[dim](from --provider)[/]\n"
+            f"[dim]Deep analysis: {config.resolve_ai_model('deep')} | "
+            f"News sentiment: "
+            f"{config.resolve_ai_model('fast') if use_llm_sentiment else 'VADER/FinBERT'}[/]\n"
+        )
+        market_overview, overview_err = generate_market_overview(
             recommendations, market_sentiment_agg, world_sentiment_agg,
             market_news, world_news,
         )
-        if market_overview:
+        if overview_err:
+            ai_api_errors.append(f"Market overview: {overview_err}")
+        elif market_overview:
             print_ai_market_overview(market_overview)
 
-        # Per-stock AI analysis
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold magenta]{task.description}"),
@@ -367,15 +360,11 @@ def main():
             TextColumn("{task.completed}/{task.total}"),
             console=console,
         ) as progress:
-            task = progress.add_task(
-                "AI analyzing stocks...", total=len(symbols)
-            )
+            task = progress.add_task("AI analysis...", total=len(symbols))
 
             for rec in recommendations:
                 sym = rec.symbol
-                progress.update(task, description=f"AI analyzing {sym}...")
-
-                insight = analyze_stock_with_ai(
+                insight, err = analyze_stock_with_ai(
                     sym, rec,
                     fundamentals.get(sym),
                     technicals.get(sym),
@@ -383,12 +372,26 @@ def main():
                     market_sentiment_agg,
                     world_sentiment_agg,
                 )
-                if insight:
+                if err:
+                    ai_api_errors.append(err)
+                elif insight:
                     ai_insights[sym] = insight
 
                 progress.update(task, advance=1)
 
-        console.print(f"\n[green]  AI analysis complete for {len(ai_insights)}/{len(symbols)} stocks[/green]\n")
+        if ai_api_errors:
+            preview = ai_api_errors[:20]
+            body = "\n".join(preview)
+            if len(ai_api_errors) > 20:
+                body += f"\n… and {len(ai_api_errors) - 20} more error(s)."
+            console.print(
+                Panel(
+                    body,
+                    title="AI API errors (check model name, quota, billing, API key)",
+                    border_style="red",
+                    expand=False,
+                )
+            )
 
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 6: Generate Report
@@ -399,13 +402,18 @@ def main():
         bottom_n = sorted_recs[-args.top:]
         display_recs = list({r.symbol: r for r in (top_n + bottom_n)}.values())
         display_recs.sort(key=lambda r: r.composite_score, reverse=True)
-        print_recommendation_summary(display_recs)
+        print_recommendation_summary(
+            display_recs,
+            include_ai_columns=use_ai,
+            ai_insights=ai_insights if use_ai else None,
+        )
     else:
         display_recs = recommendations
-        print_recommendation_summary(recommendations)
-
-    if ai_insights:
-        print_ai_comparison_table(recommendations, ai_insights)
+        print_recommendation_summary(
+            recommendations,
+            include_ai_columns=use_ai,
+            ai_insights=ai_insights if use_ai else None,
+        )
 
     print_buy_sell_hold_lists(recommendations)
 
@@ -428,6 +436,10 @@ def main():
             world_news=world_news,
             ai_insights=ai_insights,
             market_overview=market_overview,
+            market_data_summary=md_summary,
+            market_data_reports=md_reports,
+            show_ai_extended_columns=use_ai,
+            ai_errors=ai_api_errors,
         )
         console.print(f"[bold green]PDF exported:[/] {pdf_path}")
         if not args.no_telegram:

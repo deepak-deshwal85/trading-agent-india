@@ -1,30 +1,86 @@
-# Daily full run — Nifty 50, news + sentiment + fundamentals + technicals + PDF → Telegram.
-# Market data: yfinance (primary) + jugaad-data (fallback). No broker API keys.
+# Daily full run — Nifty 50, news + fundamentals + technicals + optional PDF → Telegram.
 #
-# Triggers: daily schedule (~08:00 IST), push to main/master, manual dispatch.
-# Schedule: GitHub `cron` is UTC. Default = 08:00 IST → 02:30 UTC.
+# Triggers:
+#   • schedule — Monday–Friday 08:00 IST (cron is UTC → 02:30 Mon–Fri)
+#   • workflow_dispatch — manual; mirrors main.py CLI via form inputs
 #
-# Required secrets for Telegram delivery:
-#   TELEGRAM_BOT_TOKEN — from @BotFather
-#   TELEGRAM_CHAT_ID   — your chat id (message the bot, then use getUpdates)
-#
-# Optional secrets:
-#   TELEGRAM_CAPTION — custom caption on the PDF message
-#   MAIN_PY_ARGS — override python main.py args (include --pdf --pdf-file if you change paths)
-#   ANTHROPIC_API_KEY, OPENAI_API_KEY, AI_PROVIDER — only if MAIN_PY_ARGS includes --ai
-#
-# Default: python main.py --drop-missing --pdf --pdf-file reports/market_report.pdf
+# Secrets when using AI / Telegram: TELEGRAM_*, ANTHROPIC_API_KEY, OPENAI_API_KEY.
 
 name: Daily market analysis
 
 on:
   schedule:
-    - cron: "30 2 * * *"
-  push:
-    branches:
-      - main
-      - master
+    - cron: "30 2 * * 1-5"
   workflow_dispatch:
+    inputs:
+      stocks:
+        description: Space-separated NSE symbols (empty = full Nifty 50). E.g. RELIANCE INFY TCS
+        required: false
+        default: ""
+        type: string
+      top:
+        description: Show only top N and bottom N in summary (0 = disabled)
+        required: false
+        default: "0"
+        type: string
+      finbert:
+        description: VADER + FinBERT ensemble sentiment
+        required: false
+        default: false
+        type: boolean
+      ai:
+        description: Enable AI (set API key secret for the chosen provider)
+        required: false
+        default: false
+        type: boolean
+      provider:
+        description: AI provider (used only when AI is enabled)
+        required: false
+        default: anthropic
+        type: choice
+        options:
+          - anthropic
+          - openai
+      detailed:
+        description: Print detailed per-stock panels in the job log
+        required: false
+        default: false
+        type: boolean
+      skip_news:
+        description: Skip news fetching
+        required: false
+        default: false
+        type: boolean
+      pdf:
+        description: Export PDF report
+        required: false
+        default: true
+        type: boolean
+      pdf_file:
+        description: PDF path under the repo (default reports/market_report.pdf)
+        required: false
+        default: reports/market_report.pdf
+        type: string
+      no_telegram:
+        description: Do not send PDF to Telegram after the run
+        required: false
+        default: false
+        type: boolean
+      validate_symbols:
+        description: Only validate symbols (yfinance / jugaad) and exit
+        required: false
+        default: false
+        type: boolean
+      drop_missing:
+        description: Drop missing/unreachable symbols before analysis
+        required: false
+        default: true
+        type: boolean
+      symbol_report_csv:
+        description: Optional symbol validation CSV path (or "auto"); empty = off
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: daily-analysis-${{ github.ref }}
@@ -49,33 +105,113 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run main.py (full analysis + PDF)
+      - name: Run main.py (scheduled)
+        if: github.event_name == 'schedule'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
-          MAIN_PY_ARGS: ${{ secrets.MAIN_PY_ARGS }}
         run: |
           set -e
           mkdir -p reports
           REPORT_PATH="reports/market_report.pdf"
+          python main.py --drop-missing --pdf --pdf-file "${REPORT_PATH}"
           echo "REPORT_PATH=${REPORT_PATH}" >> "${GITHUB_ENV}"
+          echo "SHOULD_TELEGRAM=true" >> "${GITHUB_ENV}"
 
-          if [ -n "${MAIN_PY_ARGS}" ]; then
-            # shellcheck disable=SC2086
-            python main.py ${MAIN_PY_ARGS}
-          else
-            python main.py --drop-missing --pdf --pdf-file "${REPORT_PATH}"
+      - name: Run main.py (manual)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          I_STOCKS: ${{ github.event.inputs.stocks }}
+          I_TOP: ${{ github.event.inputs.top }}
+          I_FINBERT: ${{ github.event.inputs.finbert }}
+          I_AI: ${{ github.event.inputs.ai }}
+          I_PROVIDER: ${{ github.event.inputs.provider }}
+          I_DETAILED: ${{ github.event.inputs.detailed }}
+          I_SKIP_NEWS: ${{ github.event.inputs.skip_news }}
+          I_PDF: ${{ github.event.inputs.pdf }}
+          I_PDF_FILE: ${{ github.event.inputs.pdf_file }}
+          I_NO_TELEGRAM: ${{ github.event.inputs.no_telegram }}
+          I_VALIDATE: ${{ github.event.inputs.validate_symbols }}
+          I_DROP: ${{ github.event.inputs.drop_missing }}
+          I_SYM_CSV: ${{ github.event.inputs.symbol_report_csv }}
+        run: |
+          set -e
+          mkdir -p reports
+          ARGS=()
+
+          if [ "${I_DROP}" = "true" ]; then
+            ARGS+=(--drop-missing)
           fi
 
-          if [ ! -f "${REPORT_PATH}" ]; then
-            FOUND="$(find reports . -maxdepth 1 -name '*.pdf' -type f 2>/dev/null | head -1)"
-            if [ -n "${FOUND}" ]; then
-              REPORT_PATH="${FOUND}"
-              echo "REPORT_PATH=${REPORT_PATH}" >> "${GITHUB_ENV}"
-            else
-              echo "No PDF found at ${REPORT_PATH}. Add --pdf --pdf-file to MAIN_PY_ARGS."
-              exit 1
+          STRIP='s/^[[:space:]]*//; s/[[:space:]]*$//'
+          STOCKS="$(echo "${I_STOCKS}" | sed "${STRIP}")"
+          if [ -n "${STOCKS}" ]; then
+            read -ra SYM_ARR <<< "${STOCKS}"
+            ARGS+=(--stocks "${SYM_ARR[@]}")
+          fi
+
+          TOP="$(echo "${I_TOP}" | sed "${STRIP}")"
+          if [ -n "${TOP}" ] && [ "${TOP}" != "0" ]; then
+            ARGS+=(--top "${TOP}")
+          fi
+
+          if [ "${I_FINBERT}" = "true" ]; then
+            ARGS+=(--finbert)
+          fi
+          if [ "${I_AI}" = "true" ]; then
+            ARGS+=(--ai --provider "${I_PROVIDER}")
+          fi
+          if [ "${I_DETAILED}" = "true" ]; then
+            ARGS+=(--detailed)
+          fi
+          if [ "${I_SKIP_NEWS}" = "true" ]; then
+            ARGS+=(--skip-news)
+          fi
+
+          PDF_PATH="$(echo "${I_PDF_FILE}" | sed "${STRIP}")"
+          [ -z "${PDF_PATH}" ] && PDF_PATH="reports/market_report.pdf"
+
+          SHOULD_TELEGRAM="false"
+          if [ "${I_PDF}" = "true" ]; then
+            PDF_PARENT="$(dirname "${PDF_PATH}")"
+            [ -n "${PDF_PARENT}" ] && [ "${PDF_PARENT}" != "." ] && mkdir -p "${PDF_PARENT}"
+            ARGS+=(--pdf --pdf-file "${PDF_PATH}")
+            echo "REPORT_PATH=${PDF_PATH}" >> "${GITHUB_ENV}"
+            SHOULD_TELEGRAM="true"
+          else
+            echo "REPORT_PATH=" >> "${GITHUB_ENV}"
+          fi
+
+          if [ "${I_NO_TELEGRAM}" = "true" ]; then
+            SHOULD_TELEGRAM="false"
+            ARGS+=(--no-telegram)
+          fi
+
+          if [ "${I_VALIDATE}" = "true" ]; then
+            ARGS+=(--validate-symbols)
+          fi
+
+          CSV="$(echo "${I_SYM_CSV}" | sed "${STRIP}")"
+          if [ -n "${CSV}" ]; then
+            CSV_PARENT="$(dirname "${CSV}")"
+            [ -n "${CSV_PARENT}" ] && [ "${CSV_PARENT}" != "." ] && mkdir -p "${CSV_PARENT}"
+            ARGS+=(--symbol-report-csv "${CSV}")
+          fi
+
+          echo "Running: python main.py" "${ARGS[@]}"
+          python main.py "${ARGS[@]}"
+
+          echo "SHOULD_TELEGRAM=${SHOULD_TELEGRAM}" >> "${GITHUB_ENV}"
+
+          # If PDF enabled but env path missing, locate any PDF written under reports/
+          if [ "${I_PDF}" = "true" ]; then
+            if [ ! -f "${PDF_PATH}" ]; then
+              FOUND="$(find reports . -maxdepth 2 -name '*.pdf' -type f -print | head -1)"
+              if [ -n "${FOUND}" ]; then
+                echo "REPORT_PATH=${FOUND}" >> "${GITHUB_ENV}"
+              fi
             fi
           fi
 
@@ -84,11 +220,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: market-report-${{ github.run_id }}
-          path: reports/
+          path: reports/*.pdf
           retention-days: 14
+          if-no-files-found: warn
 
       - name: Send PDF to Telegram
-        if: success()
+        if: >-
+          success() &&
+          env.SHOULD_TELEGRAM == 'true' &&
+          env.REPORT_PATH != ''
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -96,6 +236,10 @@ jobs:
           REPORT_PATH: ${{ env.REPORT_PATH }}
         run: |
           set -e
+          if [ ! -f "${REPORT_PATH}" ]; then
+            echo "Telegram skipped: REPORT_PATH does not exist or is empty."
+            exit 0
+          fi
           TS="$(date -u +'%Y-%m-%d %H:%M UTC')"
           CAPTION="${TELEGRAM_CAPTION:-Indian Market Advisory — ${TS}}"
           python scripts/send_telegram.py --file "${REPORT_PATH}" --caption "${CAPTION}"

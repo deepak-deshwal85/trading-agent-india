@@ -2,6 +2,7 @@
 News aggregation from multiple Indian and global financial sources.
 """
 
+import logging
 import time
 import feedparser
 import requests
@@ -57,7 +58,7 @@ def _parse_rss(url: str, source_name: str, category: str = "general",
             ))
         return items
     except Exception as e:
-        print(f"  [warn] RSS fetch failed for {source_name}: {e}")
+        _logger.debug("RSS fetch failed for %s: %s", source_name, e)
         return []
 
 
@@ -117,7 +118,7 @@ def fetch_zerodha_pulse() -> list[NewsItem]:
                 category="general",
             ))
     except Exception as e:
-        print(f"  [warn] Zerodha Pulse scrape failed: {e}")
+        _logger.debug("Zerodha Pulse scrape failed: %s", e)
     return items
 
 

@@ -17,6 +17,11 @@ from recommendation import Recommendation
 from news_fetcher import NewsItem
 from sentiment import SentimentResult
 from ai_analyzer import AIInsight, MarketOverview
+from market_data import (
+    MarketDataReportSummary,
+    SymbolFetchReport,
+    get_reports_with_fetch_issues,
+)
 
 
 import sys, io, math
@@ -102,6 +107,58 @@ def print_market_sentiment(market_sentiment: dict, world_sentiment: dict):
     console.print()
 
 
+def _fetch_outcome_label(r: SymbolFetchReport) -> str:
+    if r.both_failed:
+        return "FAILED (both)"
+    if r.resolved_source == "jugaad-data":
+        return "Recovered (jugaad)"
+    return r.resolved_source or "—"
+
+
+def print_market_data_fetch_report(
+    summary: MarketDataReportSummary,
+    reports: list[SymbolFetchReport],
+) -> None:
+    """Console report: only symbols with yfinance and/or jugaad-data issues."""
+    issues = get_reports_with_fetch_issues()
+
+    console.print()
+    console.print(
+        f"[cyan]Price data:[/] {summary.total} symbols — "
+        f"[green]yfinance OK {summary.ok_yfinance}[/], "
+        f"[green]jugaad fallback {summary.ok_jugaad}[/], "
+        f"[red]both failed {summary.both_failed}[/]"
+    )
+
+    if not issues:
+        console.print("[green]No yfinance or jugaad-data failures — all symbols fetched cleanly.[/]\n")
+        return
+
+    table = Table(
+        title=f"Market Data Issues ({len(issues)} symbol(s))",
+        box=box.ROUNDED,
+        border_style="yellow",
+        title_style="bold yellow",
+    )
+    table.add_column("Symbol", style="bold", width=12)
+    table.add_column("Outcome", width=18)
+    table.add_column("yfinance", width=40)
+    table.add_column("jugaad-data", width=40)
+
+    for r in issues:
+        style = "bold red" if r.both_failed else "yellow"
+        table.add_row(
+            r.symbol,
+            _fetch_outcome_label(r),
+            r.yfinance.summary()[:38],
+            r.jugaad.summary()[:38],
+            style=style,
+        )
+
+    console.print(table)
+    console.print()
+
+
 def print_top_news(news_items: list[NewsItem], title: str = "Top Market Headlines",
                    max_items: int = 10):
     table = Table(title=title, box=box.SIMPLE_HEAVY, border_style="blue",
@@ -117,42 +174,83 @@ def print_top_news(news_items: list[NewsItem], title: str = "Top Market Headline
     console.print()
 
 
+def _ai_agreement_label(rec: Recommendation, insight: AIInsight | None) -> tuple[str, str]:
+    """Return (text, rich style) for algo vs AI agreement."""
+    if insight is None:
+        return "—", "dim"
+    a = rec.recommendation.replace("STRONG ", "S.")
+    b = insight.ai_recommendation.replace("STRONG ", "S.")
+    if a == b:
+        return "Yes", "green"
+    return "No", "bright_red"
+
+
 def print_recommendation_summary(
     recommendations: list[Recommendation],
     *,
     title: str | None = None,
+    include_ai_columns: bool = False,
+    ai_insights: dict[str, AIInsight] | None = None,
 ):
+    """Single summary table aligned with PDF: scores, confidence, risk, algo + optional AI cols."""
     table = Table(
         title=title or "STOCK RECOMMENDATIONS SUMMARY",
         box=box.HEAVY_HEAD, border_style="bright_blue",
         title_style="bold bright_white on blue",
-        caption="Scores: 0-100 | Weights: Sentiment 25%, Fundamental 40%, Technical 35%",
+        caption=(
+            "Scores 0–100 | Weights: Sentiment 25%, Fundamental 40%, Technical 35% | "
+            "Match = algo vs AI same rating class"
+        ),
         caption_style="dim",
+        expand=False,
     )
-    table.add_column("Symbol", style="bold", width=14)
-    table.add_column("Price (₹)", justify="right", width=12)
-    table.add_column("Sentiment", justify="center", width=10)
-    table.add_column("Fund. Score", justify="center", width=11)
-    table.add_column("Tech. Score", justify="center", width=11)
-    table.add_column("Composite", justify="center", width=10)
-    table.add_column("Recommendation", justify="center", width=14)
-    table.add_column("Confidence", justify="center", width=10)
-    table.add_column("Risk", justify="center", width=10)
+    table.add_column("Symbol", style="bold", width=13)
+    table.add_column("Price", justify="right", width=11)
+    table.add_column("Sent.", justify="center", width=9)
+    table.add_column("Fund", justify="center", width=7)
+    table.add_column("Tech", justify="center", width=7)
+    table.add_column("Comp", justify="center", width=7)
+    table.add_column("Conf", justify="center", width=9)
+    table.add_column("Risk", justify="center", width=11)
+    table.add_column("Algo Rec", justify="center", width=14)
+    if include_ai_columns:
+        table.add_column("AI Rec", justify="center", width=13)
+        table.add_column("Target", justify="right", width=10)
+        table.add_column("Stop", justify="right", width=10)
+        table.add_column("Horizon", justify="center", width=12)
+        table.add_column("Match", justify="center", width=7)
 
     sorted_recs = sorted(recommendations, key=lambda r: r.composite_score, reverse=True)
+    insights = ai_insights or {}
 
     for rec in sorted_recs:
-        table.add_row(
+        ins = insights.get(rec.symbol)
+        row = [
             rec.symbol,
             _fmt_price(rec.current_price),
             f"[{_sentiment_color(rec.sentiment_label)}]{rec.sentiment_label}[/]",
             f"[{_score_color(rec.fundamental_score)}]{rec.fundamental_score:.0f}[/]",
             f"[{_score_color(rec.technical_score)}]{rec.technical_score:.0f}[/]",
             f"[{_score_color(rec.composite_score)}]{rec.composite_score:.0f}[/]",
-            f"[{_rec_color(rec.recommendation)}]{rec.recommendation}[/]",
             rec.confidence,
             rec.risk_level,
-        )
+            f"[{_rec_color(rec.recommendation)}]{rec.recommendation}[/]",
+        ]
+        if include_ai_columns:
+            if ins:
+                ai_rec = ins.ai_recommendation
+                tgt = f"₹{ins.target_price}" if ins.target_price else "—"
+                sl = f"₹{ins.stop_loss}" if ins.stop_loss else "—"
+                hz = ins.time_horizon or "—"
+                mt, mt_st = _ai_agreement_label(rec, ins)
+                row.extend([
+                    f"[{_rec_color(ai_rec)}]{ai_rec}[/]",
+                    tgt, sl, hz,
+                    f"[{mt_st}]{mt}[/]",
+                ])
+            else:
+                row.extend(["—", "—", "—", "—", "[dim]—[/]"])
+        table.add_row(*row)
 
     console.print(table)
     console.print()
@@ -326,52 +424,6 @@ def print_ai_stock_insight(insight: AIInsight):
         border_style="bright_magenta",
         box=box.ROUNDED,
     ))
-
-
-def print_ai_comparison_table(recommendations: list[Recommendation],
-                              ai_insights: dict[str, AIInsight]):
-    """Show side-by-side comparison of algorithmic vs AI recommendations."""
-    if not ai_insights:
-        return
-
-    table = Table(
-        title="ALGO vs AI RECOMMENDATIONS",
-        box=box.HEAVY_HEAD, border_style="bright_magenta",
-        title_style="bold bright_white on dark_magenta",
-    )
-    table.add_column("Symbol", style="bold", width=14)
-    table.add_column("Price (₹)", justify="right", width=12)
-    table.add_column("Algo Rec", justify="center", width=12)
-    table.add_column("AI Rec", justify="center", width=12)
-    table.add_column("Target", justify="right", width=12)
-    table.add_column("Stop Loss", justify="right", width=12)
-    table.add_column("Horizon", justify="center", width=16)
-    table.add_column("Agreement", justify="center", width=10)
-
-    sorted_recs = sorted(recommendations, key=lambda r: r.composite_score, reverse=True)
-    for rec in sorted_recs:
-        insight = ai_insights.get(rec.symbol)
-        if not insight:
-            continue
-        price = _fmt_price(rec.current_price)
-        target = f"₹{insight.target_price}" if insight.target_price else "—"
-        sl = f"₹{insight.stop_loss}" if insight.stop_loss else "—"
-
-        algo_base = rec.recommendation.replace("STRONG ", "S.")
-        ai_base = insight.ai_recommendation.replace("STRONG ", "S.")
-        agree = "Yes" if algo_base == ai_base else "No"
-        agree_style = "green" if agree == "Yes" else "bright_red"
-
-        table.add_row(
-            rec.symbol, price,
-            f"[{_rec_color(rec.recommendation)}]{rec.recommendation}[/]",
-            f"[{_rec_color(insight.ai_recommendation)}]{insight.ai_recommendation}[/]",
-            target, sl, insight.time_horizon,
-            f"[{agree_style}]{agree}[/]",
-        )
-
-    console.print(table)
-    console.print()
 
 
 def print_footer():

@@ -33,7 +33,7 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 - **Technical score (0–100)**: weighted blend — trend **30%**, momentum **30%**, volatility **15%**, volume **15%**, ADX bucket **10%** — plus Buy/Sell/Neutral-style rating
 
 ### AI-Powered Deep Analysis (NEW)
-- **Configurable provider** — Switch between Anthropic Claude and OpenAI GPT via `.env`
+- **Provider chosen on the command line** — Pass `--ai --provider anthropic` or `--ai --provider openai` (API keys only in `.env`, not the provider name)
 - **Market Overview** — AI-generated overall market outlook, Nifty view, sector rotation strategy
 - **Per-Stock Analysis** — Investment thesis, target price, stop loss, key catalysts & risks
 - **Algo vs AI Comparison** — Side-by-side table comparing algorithmic and AI recommendations
@@ -64,23 +64,29 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Edit the `.env` file to set your API keys and preferred AI provider:
+| File | Purpose | Commit? |
+|------|---------|--------|
+| **`.env`** | Secrets only: API keys, Telegram | No |
+| **`app.env`** | Models, sentiment weights, toggles | Yes |
+
+Edit **`.env`** for API keys. Edit **`app.env`** for non-secret settings (default hybrid: **Haiku 4.5** for news sentiment, **Sonnet 4.6** for deep stock/market analysis when using `--ai --provider anthropic`).
 
 ```env
-# Options: "anthropic" | "openai"
-AI_PROVIDER=anthropic
-
+# .env
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-proj-...
-
-# Optional model overrides
-# ANTHROPIC_MODEL=claude-sonnet-4-20250514
-# OPENAI_MODEL=gpt-4o
-
-# Market data: yfinance + jugaad-data — no keys required
 ```
 
-See also `.env.example`.
+```env
+# app.env (committed defaults)
+ANTHROPIC_MODEL_FAST=claude-haiku-4-5
+ANTHROPIC_MODEL_DEEP=claude-sonnet-4-6
+AI_SENTIMENT_USE_LLM=true
+```
+
+Provider is still chosen on the CLI: `--ai --provider anthropic`. Set `AI_SENTIMENT_USE_LLM=false` in `app.env` to keep VADER/`--finbert` for news even when `--ai` is on.
+
+See `.env.example` and `app.env`.
 
 ## Usage
 
@@ -94,12 +100,12 @@ python main.py
 python main.py --stocks RELIANCE INFY TCS HDFCBANK ICICIBANK
 ```
 
-### Enable AI deep analysis (uses provider from .env):
+### Enable AI deep analysis (`--provider` required):
 ```bash
-python main.py --ai --stocks RELIANCE INFY TCS
+python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 ```
 
-### Use a specific AI provider via CLI:
+### Choose AI provider via CLI:
 ```bash
 python main.py --ai --provider openai --stocks RELIANCE INFY TCS
 python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
@@ -133,7 +139,7 @@ Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegr
 | `TELEGRAM_BOT_TOKEN` | Create a bot with [@BotFather](https://t.me/BotFather), copy the token |
 | `TELEGRAM_CHAT_ID` | Message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id":...}` |
 
-Optional: `TELEGRAM_CAPTION`, `MAIN_PY_ARGS` (must include `--pdf` if you change paths), AI keys for `--ai`.
+Optional: `TELEGRAM_CAPTION`, `MAIN_PY_ARGS` (must include `--pdf --pdf-file` if you change paths). For AI in CI, include both `--ai` **and** `--provider anthropic` or `--provider openai`, plus matching API key secrets.
 
 **Test Telegram locally:**
 

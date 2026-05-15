@@ -8,8 +8,10 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
@@ -19,7 +21,12 @@ from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.lineplots import LinePlot
 
-from market_data import fetch_daily_history
+from market_data import (
+    fetch_daily_history,
+    MarketDataReportSummary,
+    SymbolFetchReport,
+    get_reports_with_fetch_issues,
+)
 
 from recommendation import Recommendation
 from news_fetcher import NewsItem
@@ -41,6 +48,92 @@ def _fmt_price(value: Optional[float]) -> str:
         return f"INR {f:,.2f}"
     except Exception:
         return "N/A"
+
+
+def _pdf_match_algo_ai(rec: Recommendation, ins: AIInsight | None) -> str:
+    if ins is None:
+        return "—"
+    a = rec.recommendation.replace("STRONG ", "S.")
+    b = ins.ai_recommendation.replace("STRONG ", "S.")
+    return "Yes" if a == b else "No"
+
+
+def _pdf_short_rec(label: str) -> str:
+    return label.replace("STRONG ", "S.")
+
+
+def _fmt_price_compact(value: Optional[float]) -> str:
+    if value is None:
+        return "—"
+    try:
+        f = float(value)
+        if f != f:
+            return "—"
+        return f"₹{f:,.2f}"
+    except Exception:
+        return "—"
+
+
+def _pdf_fmt_ai_price(value: Optional[str]) -> str:
+    if value is None:
+        return "—"
+    raw = str(value).strip()
+    if not raw or raw.lower() in ("null", "none", "n/a"):
+        return "—"
+    cleaned = raw.replace("₹", "").replace("INR", "").replace(",", "").strip()
+    try:
+        return f"₹{float(cleaned):,.0f}"
+    except ValueError:
+        return raw[:14] + ("…" if len(raw) > 14 else "")
+
+
+def _pdf_horizon_short(horizon: Optional[str]) -> str:
+    if not horizon:
+        return "—"
+    h = horizon.lower()
+    if "short" in h:
+        return "Short\n(1–3 mo)"
+    if "long" in h:
+        return "Long\n(1 yr+)"
+    if "medium" in h:
+        return "Med\n(3–12 mo)"
+    return horizon[:16] + ("…" if len(horizon) > 16 else "")
+
+
+def _stock_rec_col_widths(has_ai: bool, total_w: float) -> list[float]:
+    """Proportional widths so Symbol/Price/Horizon don't steal space from narrow score cols."""
+    if has_ai:
+        weights = (
+            1.15, 1.20, 0.95, 0.48, 0.48, 0.48,
+            0.68, 0.62, 1.05, 1.00, 0.82, 0.82, 1.55, 0.42,
+        )
+    else:
+        weights = (1.20, 1.25, 1.00, 0.52, 0.52, 0.52, 0.78, 0.72, 1.10)
+    scale = total_w / sum(weights)
+    return [w * scale for w in weights]
+
+
+def _pdf_rec_table_styles(base_styles) -> tuple[ParagraphStyle, ParagraphStyle, ParagraphStyle, ParagraphStyle]:
+    cell = ParagraphStyle(
+        "PdfRecCell",
+        parent=base_styles["Normal"],
+        fontSize=6,
+        leading=7,
+        wordWrap="CJK",
+    )
+    cell_left = ParagraphStyle("PdfRecCellL", parent=cell, alignment=TA_LEFT)
+    cell_center = ParagraphStyle("PdfRecCellC", parent=cell, alignment=TA_CENTER)
+    hdr = ParagraphStyle(
+        "PdfRecHdr",
+        parent=cell_center,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+    return hdr, cell_left, cell_center
+
+
+def _pdf_table_cell(text: str, style: ParagraphStyle) -> Paragraph:
+    return Paragraph(escape(str(text)).replace("\n", "<br/>"), style)
 
 
 def _section_title(text: str, styles):
@@ -188,6 +281,68 @@ def _draw_page_chrome(canvas, doc):
     canvas.restoreState()
 
 
+def _market_data_outcome_label(r: SymbolFetchReport) -> str:
+    if r.both_failed:
+        return "FAILED (both)"
+    if r.resolved_source == "jugaad-data":
+        return "Recovered (jugaad)"
+    return r.resolved_source or "—"
+
+
+def _market_data_report_section(
+    summary: MarketDataReportSummary | None,
+    reports: list[SymbolFetchReport] | None,
+    styles,
+) -> list:
+    """PDF block: summary counts + table of yfinance/jugaad issues only."""
+    if not reports:
+        return []
+
+    summary = summary or MarketDataReportSummary(total=len(reports))
+    issues = get_reports_with_fetch_issues()
+
+    elements = [
+        _section_title("Market Data Issues (yfinance / jugaad-data)", styles),
+        Paragraph(
+            f"Symbols analyzed: {summary.total}. "
+            f"yfinance OK: {summary.ok_yfinance}. "
+            f"jugaad fallback used: {summary.ok_jugaad}. "
+            f"Both failed: {summary.both_failed}.",
+            styles["Normal"],
+        ),
+        Spacer(1, 8),
+    ]
+
+    if not issues:
+        elements.append(Paragraph(
+            "No yfinance or jugaad-data failures — all symbols fetched cleanly.",
+            styles["Normal"],
+        ))
+        elements.append(Spacer(1, 12))
+        return elements
+
+    issue_data = [["Symbol", "Outcome", "yfinance", "jugaad-data"]]
+    for r in issues:
+        issue_data.append([
+            r.symbol,
+            _market_data_outcome_label(r),
+            r.yfinance.summary()[:100],
+            r.jugaad.summary()[:100],
+        ])
+    issue_tbl = Table(issue_data, repeatRows=1, colWidths=[2 * cm, 2.5 * cm, 5.5 * cm, 5.5 * cm])
+    issue_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#B45309")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    elements.append(issue_tbl)
+    elements.append(Spacer(1, 12))
+    return elements
+
+
 def generate_pdf_report(
     output_path: str,
     recommendations: list[Recommendation],
@@ -197,10 +352,15 @@ def generate_pdf_report(
     world_news: list[NewsItem],
     ai_insights: dict[str, AIInsight],
     market_overview: MarketOverview | None,
+    market_data_summary: MarketDataReportSummary | None = None,
+    market_data_reports: list[SymbolFetchReport] | None = None,
+    show_ai_extended_columns: bool = False,
+    ai_errors: list[str] | None = None,
 ) -> str:
     """Generate a polished PDF report and return absolute path."""
     out = Path(output_path).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
+    ai_errors = ai_errors or []
 
     doc = SimpleDocTemplate(
         str(out),
@@ -268,6 +428,7 @@ def generate_pdf_report(
     ]))
     story.append(sent_tbl)
     story.append(Spacer(1, 14))
+    story.extend(_market_data_report_section(market_data_summary, market_data_reports, styles))
     story.append(_section_title("Visual Snapshot", styles))
     story.append(_sentiment_pie(
         "Indian Market Sentiment",
@@ -315,29 +476,74 @@ def generate_pdf_report(
         story.append(Paragraph(f"<b>Strategy:</b> {market_overview.strategy_advice}", styles["Normal"]))
         story.append(Spacer(1, 12))
 
+    if ai_errors:
+        story.append(_section_title("AI API errors", styles))
+        truncated = []
+        for e in ai_errors[:35]:
+            s = escape(str(e))
+            if len(s) > 400:
+                s = s[:400] + "…"
+            truncated.append(s)
+        story.append(Paragraph("<br/>".join(truncated), styles["Small"]))
+        story.append(Spacer(1, 10))
+
     story.append(_section_title("Stock Recommendations", styles))
+    story.append(Paragraph(
+        "Same column layout as console summary: scores, confidence, risk, algo vs AI when --ai is used.",
+        styles["Small"],
+    ))
+    story.append(Spacer(1, 4))
     sorted_recs = sorted(recommendations, key=lambda r: r.composite_score, reverse=True)
-    rec_data = [["Symbol", "Price", "Sent.", "Fund", "Tech", "Composite", "Algo Rec", "AI Rec"]]
+
+    header = [
+        "Symbol", "Price", "Sent.", "Fund", "Tech", "Comp.",
+        "Conf.", "Risk", "Algo\nRec",
+    ]
+    if show_ai_extended_columns:
+        header.extend(["AI\nRec", "Target", "Stop", "Horizon", "Mtch"])
+
+    usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+    col_widths = _stock_rec_col_widths(show_ai_extended_columns, usable_w)
+    hdr_style, cell_left, cell_center = _pdf_rec_table_styles(styles)
+
+    rec_data = [[_pdf_table_cell(h, hdr_style) for h in header]]
+
     for rec in sorted_recs:
-        ai_rec = ai_insights.get(rec.symbol).ai_recommendation if rec.symbol in ai_insights else "-"
-        rec_data.append([
+        ins = ai_insights.get(rec.symbol) if show_ai_extended_columns else None
+        texts = [
             rec.symbol,
-            _fmt_price(rec.current_price),
+            _fmt_price_compact(rec.current_price),
             rec.sentiment_label,
             f"{rec.fundamental_score:.0f}",
             f"{rec.technical_score:.0f}",
             f"{rec.composite_score:.0f}",
-            rec.recommendation,
-            ai_rec,
-        ])
+            rec.confidence,
+            rec.risk_level,
+            _pdf_short_rec(rec.recommendation),
+        ]
+        if show_ai_extended_columns:
+            if ins:
+                texts.extend([
+                    _pdf_short_rec(ins.ai_recommendation),
+                    _pdf_fmt_ai_price(ins.target_price),
+                    _pdf_fmt_ai_price(ins.stop_loss),
+                    _pdf_horizon_short(ins.time_horizon),
+                    _pdf_match_algo_ai(rec, ins),
+                ])
+            else:
+                texts.extend(["—", "—", "—", "—", "—"])
+        row = [_pdf_table_cell(t, cell_left if i == 0 else cell_center) for i, t in enumerate(texts)]
+        rec_data.append(row)
 
-    rec_tbl = Table(rec_data, repeatRows=1)
+    rec_tbl = Table(rec_data, repeatRows=1, colWidths=col_widths)
     rec_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1D4ED8")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.append(rec_tbl)
     story.append(Spacer(1, 12))

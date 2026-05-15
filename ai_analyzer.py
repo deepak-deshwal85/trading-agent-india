@@ -4,14 +4,12 @@ Sends structured market data to the LLM and gets expert-level investment insight
 """
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from config import (
-    AI_PROVIDER, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    ANTHROPIC_MODEL, OPENAI_MODEL,
-    ADX_GATE_THRESHOLD,
-)
+import config
+from config import ADX_GATE_THRESHOLD
 from recommendation import Recommendation
 from fundamental import FundamentalData
 from technical import TechnicalData
@@ -192,54 +190,71 @@ Based on ALL this data, provide your expert market overview. Respond ONLY with v
 }}"""
 
 
-def _call_anthropic(prompt: str) -> str:
+def _call_anthropic(prompt: str, *, model: str, max_tokens: int = 2000) -> str:
     import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=2000,
+        model=model,
+        max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
     return message.content[0].text
 
 
-def _call_openai(prompt: str) -> str:
+def _call_openai(prompt: str, *, model: str, max_tokens: int = 2000, temperature: float = 0.3) -> str:
     from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=config.OPENAI_API_KEY)
     response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+        model=model,
         messages=[
             {"role": "system", "content": "You are a senior Indian equity research analyst. Always respond with valid JSON only, no markdown fences."},
             {"role": "user", "content": prompt},
         ],
-        max_tokens=2000,
-        temperature=0.3,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
     return response.choices[0].message.content
 
 
+def call_llm(
+    prompt: str,
+    *,
+    tier: str = "deep",
+    max_tokens: int = 2000,
+    temperature: float = 0.3,
+) -> tuple[str, str, str]:
+    """Call CLI provider. Returns (response_text, provider, model_id). tier: fast | deep."""
+    primary = config.AI_PROVIDER.lower().strip()
+    if primary not in ("openai", "anthropic"):
+        raise RuntimeError(
+            "AI provider not set. Run with --ai --provider anthropic or --ai --provider openai."
+        )
+    model = config.resolve_ai_model(tier)
+
+    try:
+        if primary == "openai":
+            if not config.OPENAI_API_KEY:
+                raise RuntimeError("OPENAI_API_KEY is not set in .env")
+            text = _call_openai(
+                prompt, model=model, max_tokens=max_tokens, temperature=temperature,
+            )
+            return text, "openai", model
+        if not config.ANTHROPIC_API_KEY:
+            raise RuntimeError("ANTHROPIC_API_KEY is not set in .env")
+        text = _call_anthropic(prompt, model=model, max_tokens=max_tokens)
+        return text, "anthropic", model
+    except Exception as e:
+        raise RuntimeError(f"{primary} API call failed ({model}): {e}") from e
+
+
 def _call_llm(prompt: str) -> tuple[str, str]:
-    """Call the configured LLM. Returns (response_text, provider_used).
-    Falls back to the other provider if the primary one fails."""
-    primary = AI_PROVIDER
-    fallback = "anthropic" if primary == "openai" else "openai"
-
-    for provider in [primary, fallback]:
-        try:
-            if provider == "openai" and OPENAI_API_KEY:
-                return _call_openai(prompt), "openai"
-            elif provider == "anthropic" and ANTHROPIC_API_KEY:
-                return _call_anthropic(prompt), "anthropic"
-        except Exception as e:
-            print(f"  [warn] {provider} call failed: {e}")
-            if provider == fallback:
-                raise
-            print(f"  [info] Falling back to {fallback}...")
-    raise RuntimeError("No AI provider available. Set API keys in .env")
+    """Deep analysis (Sonnet / gpt-4o). Returns (response_text, provider_used)."""
+    text, provider, _model = call_llm(prompt, tier="deep")
+    return text, provider
 
 
-def _parse_json(raw: str) -> dict:
-    """Extract JSON from LLM response, handling markdown fences."""
+def _parse_json(raw: str):
+    """Extract JSON object or array from LLM response, handling markdown fences."""
     text = raw.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -248,10 +263,11 @@ def _parse_json(raw: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start = text.find(opener)
+            end = text.rfind(closer) + 1
+            if start >= 0 and end > start:
+                return json.loads(text[start:end])
         raise
 
 
@@ -263,11 +279,15 @@ def analyze_stock_with_ai(
     news_items: list[NewsItem],
     market_sentiment: dict,
     world_sentiment: dict,
-) -> Optional[AIInsight]:
-    """Get AI-powered deep analysis for a single stock."""
-    api_key = OPENAI_API_KEY if AI_PROVIDER == "openai" else ANTHROPIC_API_KEY
+) -> tuple[Optional[AIInsight], Optional[str]]:
+    """Returns (AIInsight, None) on success, or (None, human-readable error)."""
+    api_key = (
+        config.OPENAI_API_KEY
+        if config.AI_PROVIDER == "openai"
+        else config.ANTHROPIC_API_KEY
+    )
     if not api_key:
-        return None
+        return None, f"{symbol}: No API key for {config.AI_PROVIDER}"
 
     try:
         prompt = _build_stock_prompt(
@@ -290,10 +310,10 @@ def analyze_stock_with_ai(
             sector_view=data.get("sector_view", ""),
             confidence_rationale=data.get("confidence_rationale", ""),
             provider=provider_used,
-        )
+        ), None
     except Exception as e:
-        print(f"  [warn] AI analysis failed for {symbol}: {e}")
-        return None
+        logging.getLogger("ai_analyzer").warning("AI stock analysis failed (%s): %s", symbol, e)
+        return None, f"{symbol}: {e}"
 
 
 def generate_market_overview(
@@ -302,11 +322,15 @@ def generate_market_overview(
     world_sentiment: dict,
     market_news: list[NewsItem],
     world_news: list[NewsItem],
-) -> Optional[MarketOverview]:
-    """Get AI-powered overall market overview and strategy."""
-    api_key = OPENAI_API_KEY if AI_PROVIDER == "openai" else ANTHROPIC_API_KEY
+) -> tuple[Optional[MarketOverview], Optional[str]]:
+    """Returns (overview, None) or (None, error message)."""
+    api_key = (
+        config.OPENAI_API_KEY
+        if config.AI_PROVIDER == "openai"
+        else config.ANTHROPIC_API_KEY
+    )
     if not api_key:
-        return None
+        return None, f"No API key for {config.AI_PROVIDER}"
 
     try:
         market_headlines = [n.title for n in market_news[:15]]
@@ -328,7 +352,7 @@ def generate_market_overview(
             avoid_list=data.get("avoid_list", []),
             strategy_advice=data.get("strategy_advice", ""),
             provider=provider_used,
-        )
+        ), None
     except Exception as e:
-        print(f"  [warn] AI market overview failed: {e}")
-        return None
+        logging.getLogger("ai_analyzer").warning("AI market overview failed: %s", e)
+        return None, str(e)

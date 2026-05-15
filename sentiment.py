@@ -6,6 +6,7 @@ confidence-weighted ensemble with source credibility and recency decay.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -231,7 +232,9 @@ def _load_finbert() -> Optional[Any]:
             top_k=None,
         )
     except Exception as e:
-        print(f"  [warn] FinBERT (ProsusAI) load failed: {e}. Ensemble will fall back.")
+        logging.getLogger("sentiment").debug(
+            "FinBERT (ProsusAI) load failed: %s — ensemble will fall back to VADER", e
+        )
         return None
 
 
@@ -268,7 +271,9 @@ def _get_finbert_tone_pipeline() -> Optional[Any]:
             top_k=None,
         )
     except Exception as e:
-        print(f"  [warn] FinBERT-Tone load failed: {e}. Continuing without tone model.")
+        logging.getLogger("sentiment").debug(
+            "FinBERT-Tone load failed: %s — continuing without tone model", e
+        )
         _finbert_tone_pipeline = None
     return _finbert_tone_pipeline
 
@@ -358,8 +363,13 @@ def analyze_sentiment_finbert(text: str) -> SentimentResult:
 def analyze_news_sentiment(
     news_items: list[NewsItem],
     use_finbert: bool = False,
+    use_llm: bool = False,
 ) -> list[SentimentResult]:
     """Per-article sentiment with source × recency blend weights in aggregate."""
+    if use_llm:
+        from ai_sentiment import analyze_news_sentiment_llm
+        return analyze_news_sentiment_llm(news_items)
+
     results: list[SentimentResult] = []
     for item in news_items:
         text = f"{item.title}. {item.summary}" if item.summary else item.title

@@ -6,6 +6,7 @@ categories (trend / momentum / volatility / volume / ADX) with ADX gating
 on momentum oscillators when ADX <= ADX_GATE_THRESHOLD.
 """
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Optional
@@ -296,7 +297,7 @@ def fetch_technical(symbol: str) -> Optional[TechnicalData]:
         return data
 
     except Exception as e:
-        print(f"  [warn] Technical analysis failed for {symbol}: {e}")
+        logging.getLogger("technical").debug("Technical analysis failed for %s: %s", symbol, e)
         return None
 
 
