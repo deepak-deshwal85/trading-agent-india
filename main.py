@@ -11,8 +11,9 @@ Usage:
     python main.py --ai --provider anthropic          # AI via Claude (provider required)
     python main.py --ai --provider openai           # AI via GPT
     python main.py --ai --detailed                   # AI + detailed per-stock panels
-    python main.py --top 10                          # Show top/bottom 10 only
     python main.py --finbert                         # Ensemble: VADER + FinBERT (+ optional Tone)
+
+Each successful analysis run writes a PDF and sends it via Telegram when TELEGRAM_* are set in .env (see --pdf-file).
 """
 
 import argparse
@@ -71,10 +72,6 @@ def parse_args():
              "Defaults to all Nifty 50.",
     )
     parser.add_argument(
-        "--top", type=int, default=None,
-        help="Show only top N and bottom N stocks in summary.",
-    )
-    parser.add_argument(
         "--finbert", action="store_true",
         help="Use ensemble sentiment: VADER + ProsusAI FinBERT (+ FinBERT-Tone if available).",
     )
@@ -95,21 +92,8 @@ def parse_args():
         help="Skip news fetching (faster re-runs for testing).",
     )
     parser.add_argument(
-        "--pdf", action="store_true",
-        help="Export report as a modern PDF file.",
-    )
-    parser.add_argument(
         "--pdf-file", type=str, default="market_report.pdf",
-        help="Output PDF file path (default: market_report.pdf).",
-    )
-    parser.add_argument(
-        "--no-telegram",
-        action="store_true",
-        help="Do not send the PDF to Telegram (default: send when TELEGRAM_* is set in .env).",
-    )
-    parser.add_argument(
-        "--validate-symbols", action="store_true",
-        help="Validate symbols (yfinance / jugaad-data) and exit (no analysis run).",
+        help="PDF output path (always generated after analysis; default: market_report.pdf).",
     )
     parser.add_argument(
         "--drop-missing", action="store_true",
@@ -117,7 +101,7 @@ def parse_args():
     )
     parser.add_argument(
         "--symbol-report-csv", type=str, default=None,
-        help="Optional CSV path to save symbol validation result (status per symbol).",
+        help="Run yfinance/jugaad validation first and save status CSV (analysis continues unless --drop-missing).",
     )
     args = parser.parse_args()
     if args.ai and not args.provider:
@@ -128,7 +112,7 @@ def parse_args():
 
 
 def _send_pdf_to_telegram(pdf_path: str) -> None:
-    """Send PDF via Telegram if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are in .env."""
+    """Send PDF via Telegram when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         console.print(
             "[dim]Telegram: skipped — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env "
@@ -208,7 +192,7 @@ def main():
     if not ok:
         console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
 
-    if args.validate_symbols or args.drop_missing:
+    if args.drop_missing or args.symbol_report_csv:
         console.print("[bold cyan]Symbol data validation[/bold cyan]")
         result = validate_symbols(symbols)
         ok_syms = result["ok"]
@@ -230,9 +214,6 @@ def main():
             )
         if args.symbol_report_csv:
             _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
-
-        if args.validate_symbols:
-            return
 
         if args.drop_missing:
             symbols = ok_syms
@@ -396,24 +377,11 @@ def main():
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 6: Generate Report
     # ══════════════════════════════════════════════════════════════════════════
-    if args.top:
-        sorted_recs = sorted(recommendations, key=lambda r: r.composite_score, reverse=True)
-        top_n = sorted_recs[:args.top]
-        bottom_n = sorted_recs[-args.top:]
-        display_recs = list({r.symbol: r for r in (top_n + bottom_n)}.values())
-        display_recs.sort(key=lambda r: r.composite_score, reverse=True)
-        print_recommendation_summary(
-            display_recs,
-            include_ai_columns=use_ai,
-            ai_insights=ai_insights if use_ai else None,
-        )
-    else:
-        display_recs = recommendations
-        print_recommendation_summary(
-            recommendations,
-            include_ai_columns=use_ai,
-            ai_insights=ai_insights if use_ai else None,
-        )
+    print_recommendation_summary(
+        recommendations,
+        include_ai_columns=use_ai,
+        ai_insights=ai_insights if use_ai else None,
+    )
 
     print_buy_sell_hold_lists(recommendations)
 
@@ -426,24 +394,22 @@ def main():
                 print_ai_stock_insight(ai_insights[rec.symbol])
             console.print()
 
-    if args.pdf:
-        pdf_path = generate_pdf_report(
-            output_path=args.pdf_file,
-            recommendations=display_recs,
-            market_sentiment=market_sentiment_agg,
-            world_sentiment=world_sentiment_agg,
-            market_news=market_news,
-            world_news=world_news,
-            ai_insights=ai_insights,
-            market_overview=market_overview,
-            market_data_summary=md_summary,
-            market_data_reports=md_reports,
-            show_ai_extended_columns=use_ai,
-            ai_errors=ai_api_errors,
-        )
-        console.print(f"[bold green]PDF exported:[/] {pdf_path}")
-        if not args.no_telegram:
-            _send_pdf_to_telegram(pdf_path)
+    pdf_path = generate_pdf_report(
+        output_path=args.pdf_file,
+        recommendations=recommendations,
+        market_sentiment=market_sentiment_agg,
+        world_sentiment=world_sentiment_agg,
+        market_news=market_news,
+        world_news=world_news,
+        ai_insights=ai_insights,
+        market_overview=market_overview,
+        market_data_summary=md_summary,
+        market_data_reports=md_reports,
+        show_ai_extended_columns=use_ai,
+        ai_errors=ai_api_errors,
+    )
+    console.print(f"[bold green]PDF exported:[/] {pdf_path}")
+    _send_pdf_to_telegram(pdf_path)
 
     # ── Timing ──
     elapsed = time.time() - start_time

@@ -1,4 +1,4 @@
-# Daily full run — Nifty 50, news + fundamentals + technicals + optional PDF → Telegram.
+# Daily full run — Nifty 50, news + fundamentals + technicals + PDF → Telegram.
 #
 # Triggers:
 #   • schedule — Monday–Friday 08:00 IST (cron is UTC → 02:30 Mon–Fri)
@@ -17,11 +17,6 @@ on:
         description: Space-separated NSE symbols (empty = full Nifty 50). E.g. RELIANCE INFY TCS
         required: false
         default: ""
-        type: string
-      top:
-        description: Show only top N and bottom N in summary (0 = disabled)
-        required: false
-        default: "0"
         type: string
       finbert:
         description: VADER + FinBERT ensemble sentiment
@@ -51,26 +46,11 @@ on:
         required: false
         default: false
         type: boolean
-      pdf:
-        description: Export PDF report
-        required: false
-        default: true
-        type: boolean
       pdf_file:
-        description: PDF path under the repo (default reports/market_report.pdf)
+        description: PDF output path under the repo (always generated and sent to Telegram when secrets are set)
         required: false
         default: reports/market_report.pdf
         type: string
-      no_telegram:
-        description: Do not send PDF to Telegram after the run
-        required: false
-        default: false
-        type: boolean
-      validate_symbols:
-        description: Only validate symbols (yfinance / jugaad) and exit
-        required: false
-        default: false
-        type: boolean
       drop_missing:
         description: Drop missing/unreachable symbols before analysis
         required: false
@@ -114,9 +94,8 @@ jobs:
           set -e
           mkdir -p reports
           REPORT_PATH="reports/market_report.pdf"
-          python main.py --drop-missing --pdf --pdf-file "${REPORT_PATH}"
+          python main.py --drop-missing --pdf-file "${REPORT_PATH}"
           echo "REPORT_PATH=${REPORT_PATH}" >> "${GITHUB_ENV}"
-          echo "SHOULD_TELEGRAM=true" >> "${GITHUB_ENV}"
 
       - name: Run main.py (manual)
         if: github.event_name == 'workflow_dispatch'
@@ -124,16 +103,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           I_STOCKS: ${{ github.event.inputs.stocks }}
-          I_TOP: ${{ github.event.inputs.top }}
           I_FINBERT: ${{ github.event.inputs.finbert }}
           I_AI: ${{ github.event.inputs.ai }}
           I_PROVIDER: ${{ github.event.inputs.provider }}
           I_DETAILED: ${{ github.event.inputs.detailed }}
           I_SKIP_NEWS: ${{ github.event.inputs.skip_news }}
-          I_PDF: ${{ github.event.inputs.pdf }}
           I_PDF_FILE: ${{ github.event.inputs.pdf_file }}
-          I_NO_TELEGRAM: ${{ github.event.inputs.no_telegram }}
-          I_VALIDATE: ${{ github.event.inputs.validate_symbols }}
           I_DROP: ${{ github.event.inputs.drop_missing }}
           I_SYM_CSV: ${{ github.event.inputs.symbol_report_csv }}
         run: |
@@ -152,11 +127,6 @@ jobs:
             ARGS+=(--stocks "${SYM_ARR[@]}")
           fi
 
-          TOP="$(echo "${I_TOP}" | sed "${STRIP}")"
-          if [ -n "${TOP}" ] && [ "${TOP}" != "0" ]; then
-            ARGS+=(--top "${TOP}")
-          fi
-
           if [ "${I_FINBERT}" = "true" ]; then
             ARGS+=(--finbert)
           fi
@@ -172,26 +142,10 @@ jobs:
 
           PDF_PATH="$(echo "${I_PDF_FILE}" | sed "${STRIP}")"
           [ -z "${PDF_PATH}" ] && PDF_PATH="reports/market_report.pdf"
-
-          SHOULD_TELEGRAM="false"
-          if [ "${I_PDF}" = "true" ]; then
-            PDF_PARENT="$(dirname "${PDF_PATH}")"
-            [ -n "${PDF_PARENT}" ] && [ "${PDF_PARENT}" != "." ] && mkdir -p "${PDF_PARENT}"
-            ARGS+=(--pdf --pdf-file "${PDF_PATH}")
-            echo "REPORT_PATH=${PDF_PATH}" >> "${GITHUB_ENV}"
-            SHOULD_TELEGRAM="true"
-          else
-            echo "REPORT_PATH=" >> "${GITHUB_ENV}"
-          fi
-
-          if [ "${I_NO_TELEGRAM}" = "true" ]; then
-            SHOULD_TELEGRAM="false"
-            ARGS+=(--no-telegram)
-          fi
-
-          if [ "${I_VALIDATE}" = "true" ]; then
-            ARGS+=(--validate-symbols)
-          fi
+          PDF_PARENT="$(dirname "${PDF_PATH}")"
+          [ -n "${PDF_PARENT}" ] && [ "${PDF_PARENT}" != "." ] && mkdir -p "${PDF_PARENT}"
+          ARGS+=(--pdf-file "${PDF_PATH}")
+          echo "REPORT_PATH=${PDF_PATH}" >> "${GITHUB_ENV}"
 
           CSV="$(echo "${I_SYM_CSV}" | sed "${STRIP}")"
           if [ -n "${CSV}" ]; then
@@ -203,15 +157,10 @@ jobs:
           echo "Running: python main.py" "${ARGS[@]}"
           python main.py "${ARGS[@]}"
 
-          echo "SHOULD_TELEGRAM=${SHOULD_TELEGRAM}" >> "${GITHUB_ENV}"
-
-          # If PDF enabled but env path missing, locate any PDF written under reports/
-          if [ "${I_PDF}" = "true" ]; then
-            if [ ! -f "${PDF_PATH}" ]; then
-              FOUND="$(find reports . -maxdepth 2 -name '*.pdf' -type f -print | head -1)"
-              if [ -n "${FOUND}" ]; then
-                echo "REPORT_PATH=${FOUND}" >> "${GITHUB_ENV}"
-              fi
+          if [ ! -f "${PDF_PATH}" ]; then
+            FOUND="$(find reports . -maxdepth 2 -name '*.pdf' -type f -print | head -1)"
+            if [ -n "${FOUND}" ]; then
+              echo "REPORT_PATH=${FOUND}" >> "${GITHUB_ENV}"
             fi
           fi
 
@@ -225,10 +174,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Send PDF to Telegram
-        if: >-
-          success() &&
-          env.SHOULD_TELEGRAM == 'true' &&
-          env.REPORT_PATH != ''
+        if: success() && env.REPORT_PATH != ''
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

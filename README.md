@@ -116,18 +116,20 @@ python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 python main.py --ai --detailed --stocks RELIANCE INFY TCS
 ```
 
-### Export modern PDF report:
+### PDF output path (`--pdf-file`)
+Every completed analysis writes a PDF (default `market_report.pdf`) and sends it via Telegram when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
+
 ```bash
-python main.py --ai --detailed --pdf --pdf-file reports/market_report.pdf --stocks RELIANCE INFY TCS
+python main.py --ai --detailed --pdf-file reports/market_report.pdf --stocks RELIANCE INFY TCS
 ```
 
 ## Production Run Commands
 
-### GitHub Actions (scheduled full run + Telegram PDF)
-The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs on **push to `main`/`master`**, **daily at ~08:00 IST**, and **manual dispatch**. Default command:
+### GitHub Actions (scheduled Mon–Fri + manual dispatch + Telegram PDF)
+The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs **Monday–Friday ~08:00 IST** and on **manual dispatch**. Default command:
 
 ```bash
-python main.py --drop-missing --pdf --pdf-file reports/market_report.pdf
+python main.py --drop-missing --pdf-file reports/market_report.pdf
 ```
 
 Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegram bot**.
@@ -139,14 +141,14 @@ Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegr
 | `TELEGRAM_BOT_TOKEN` | Create a bot with [@BotFather](https://t.me/BotFather), copy the token |
 | `TELEGRAM_CHAT_ID` | Message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id":...}` |
 
-Optional: `TELEGRAM_CAPTION`, `MAIN_PY_ARGS` (must include `--pdf --pdf-file` if you change paths). For AI in CI, include both `--ai` **and** `--provider anthropic` or `--provider openai`, plus matching API key secrets.
+Optional: `TELEGRAM_CAPTION`. For AI in CI, enable inputs for `--ai` **and** `--provider anthropic` or `--provider openai`, plus matching API key secrets.
 
 **Test Telegram locally:**
 
 ```powershell
 $env:TELEGRAM_BOT_TOKEN = "your-token"
 $env:TELEGRAM_CHAT_ID = "your-chat-id"
-python main.py --skip-news --stocks RELIANCE --pdf --pdf-file reports/test.pdf
+python main.py --skip-news --stocks RELIANCE --pdf-file reports/test.pdf
 python scripts/send_telegram.py --file reports/test.pdf --caption "Test report"
 ```
 
@@ -154,13 +156,13 @@ python scripts/send_telegram.py --file reports/test.pdf --caption "Test report"
 **PowerShell**
 ```powershell
 $ts = Get-Date -Format "yyyyMMdd_HHmm"
-python main.py --ai --provider openai --pdf --pdf-file "reports/nifty50_$ts.pdf" --top 20
+python main.py --ai --provider openai --pdf-file "reports/nifty50_$ts.pdf"
 ```
 
 ### Faster run (skip market news fetch, still computes stocks + AI)
 ```powershell
 $ts = Get-Date -Format "yyyyMMdd_HHmm"
-python main.py --ai --provider openai --skip-news --pdf --pdf-file "reports/nifty50_fast_$ts.pdf" --top 20
+python main.py --ai --provider openai --skip-news --pdf-file "reports/nifty50_fast_$ts.pdf"
 ```
 
 ### Health check before scheduled run
@@ -172,29 +174,18 @@ Expected output:
 (True, 'Market data OK (yfinance).')
 ```
 
-### Validate symbol availability before full run
-```powershell
-# Validate Nifty50 (yfinance / jugaad-data)
-python main.py --validate-symbols
-
-# Validate custom symbols
-python main.py --validate-symbols --stocks RELIANCE INFY TATAMOTORS
-```
-
 ### Auto-drop missing symbols and continue run
 ```powershell
 # Drop missing/unreachable symbols, continue analysis with valid symbols only
-python main.py --ai --drop-missing --pdf --pdf-file reports/market_after_drop.pdf
+python main.py --ai --drop-missing --pdf-file reports/market_after_drop.pdf
 ```
 
-### Save validation report to CSV
+### Save validation report to CSV (then continue full analysis)
 ```powershell
-# Save symbol status to an explicit file
-python main.py --validate-symbols --symbol-report-csv reports/symbol_validation.csv
-
-# Auto timestamped CSV
-python main.py --validate-symbols --symbol-report-csv auto
+python main.py --symbol-report-csv reports/symbol_validation.csv
+python main.py --symbol-report-csv auto
 ```
+Use with `--drop-missing` to filter to valid symbols after writing the CSV.
 
 ### Windows Task Scheduler action example
 Program/script:
@@ -203,17 +194,12 @@ powershell.exe
 ```
 Arguments:
 ```text
--NoProfile -ExecutionPolicy Bypass -Command "$ts = Get-Date -Format 'yyyyMMdd_HHmm'; cd 'C:\Users\Swati\trading-agent-india'; python main.py --ai --provider openai --pdf --pdf-file ('reports/nifty50_'+$ts+'.pdf') --top 20"
+-NoProfile -ExecutionPolicy Bypass -Command "$ts = Get-Date -Format 'yyyyMMdd_HHmm'; cd 'C:\Users\Swati\trading-agent-india'; python main.py --ai --provider openai --pdf-file ('reports/nifty50_'+$ts+'.pdf')"
 ```
 
 ### Use FinBERT + AI for maximum accuracy:
 ```bash
 python main.py --finbert --ai --stocks RELIANCE INFY TCS
-```
-
-### Show top/bottom N stocks only:
-```bash
-python main.py --top 10
 ```
 
 ### Skip news (faster, for testing):
