@@ -1,9 +1,14 @@
-# Daily run — free market data (yfinance + jugaad-data fallback). No broker API keys.
+# Daily full run — Nifty 50, news + sentiment + fundamentals + technicals.
+# Market data: yfinance (primary) + jugaad-data (fallback). No broker API keys.
 #
 # Schedule: GitHub `cron` is UTC. Default = 08:00 IST → 02:30 UTC.
 #
-# Secrets (optional): ANTHROPIC_API_KEY, OPENAI_API_KEY, AI_PROVIDER, MAIN_PY_ARGS
-# Example MAIN_PY_ARGS: "--skip-news --finbert"
+# Optional secrets (Settings → Secrets and variables → Actions):
+#   MAIN_PY_ARGS — override default (e.g. "--ai --provider openai --pdf --pdf-file report.pdf")
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, AI_PROVIDER — only if MAIN_PY_ARGS includes --ai
+#
+# Default command: python main.py --drop-missing
+#   (same as local full run, but drops symbols with no price data so CI does not fail on one bad ticker)
 
 name: Daily market analysis
 
@@ -19,7 +24,7 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -35,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run main.py
+      - name: Run main.py (full analysis)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -47,5 +52,5 @@ jobs:
             # shellcheck disable=SC2086
             python main.py ${MAIN_PY_ARGS}
           else
-            python main.py --skip-news
+            python main.py --drop-missing
           fi
