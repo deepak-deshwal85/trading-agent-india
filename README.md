@@ -118,7 +118,7 @@ python main.py --ai --detailed --pdf --pdf-file reports/market_report.pdf --stoc
 ## Production Run Commands
 
 ### GitHub Actions (scheduled full run)
-The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs daily at ~08:00 IST with:
+The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs on **push to `main`/`master`**, **daily at ~08:00 IST**, and **manual dispatch**, with:
 
 ```bash
 python main.py --drop-missing

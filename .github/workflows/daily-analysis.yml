@@ -1,6 +1,7 @@
 # Daily full run — Nifty 50, news + sentiment + fundamentals + technicals.
 # Market data: yfinance (primary) + jugaad-data (fallback). No broker API keys.
 #
+# Triggers: daily schedule (~08:00 IST), push to main/master, manual dispatch.
 # Schedule: GitHub `cron` is UTC. Default = 08:00 IST → 02:30 UTC.
 #
 # Optional secrets (Settings → Secrets and variables → Actions):
@@ -15,6 +16,10 @@ name: Daily market analysis
 on:
   schedule:
     - cron: "30 2 * * *"
+  push:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 concurrency:
