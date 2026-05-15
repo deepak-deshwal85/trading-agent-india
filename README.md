@@ -126,15 +126,15 @@ python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 
 ### GitHub Actions (three workflows + Telegram PDF)
 
-There are **three** workflows under [`.github/workflows/`](.github/workflows/), each with **`workflow_dispatch`** (manual run) plus its own schedule:
+There are **three** workflows under [`.github/workflows/`](.github/workflows/):
 
-| Workflow | Schedule | Command |
-|----------|----------|---------|
-| [`market-analysis-no-ai.yml`](.github/workflows/market-analysis-no-ai.yml) | Every **6 hours** on **IST** wall clock (midnight, 06:00, 12:00, 18:00 IST; expressed as cron in UTC) | `python main.py` |
-| [`market-analysis-anthropic.yml`](.github/workflows/market-analysis-anthropic.yml) | **Monday–Friday ~08:00 IST** | `python main.py --ai --provider anthropic` |
-| [`market-analysis-openai.yml`](.github/workflows/market-analysis-openai.yml) | **Monday–Friday ~08:00 IST** | `python main.py --ai --provider openai` |
+| Workflow | When it runs | Command |
+|----------|----------------|----------|
+| [`market-analysis-no-ai.yml`](.github/workflows/market-analysis-no-ai.yml) | **Schedule:** every **6 hours** starting **08:00 IST** (then 14:00, 20:00, 02:00 IST; cron is in UTC). **`workflow_dispatch`** for manual runs. | `python main.py` |
+| [`market-analysis-anthropic.yml`](.github/workflows/market-analysis-anthropic.yml) | **`workflow_dispatch` only** (manual) | `python main.py --ai --provider anthropic` |
+| [`market-analysis-openai.yml`](.github/workflows/market-analysis-openai.yml) | **`workflow_dispatch` only** (manual) | `python main.py --ai --provider openai` |
 
-Each run **uploads the PDF** artifact and **sends it** via Telegram when secrets are set. If both AI workflows stay enabled on the same cron, you get **two** reports at that time—disable the workflow you do not use (repository **Actions** tab → workflow → ⋯ → disable).
+Each run **uploads the PDF** artifact and **sends it** via Telegram when secrets are set.
 
 **Required repo secrets** (Settings → Secrets and variables → Actions):
 
@@ -143,7 +143,7 @@ Each run **uploads the PDF** artifact and **sends it** via Telegram when secrets
 | `TELEGRAM_BOT_TOKEN` | Create a bot with [@BotFather](https://t.me/BotFather), copy the token |
 | `TELEGRAM_CHAT_ID` | Message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id":...}` |
 
-Optional: `TELEGRAM_CAPTION`. For scheduled AI runs, set `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` to match the workflows you keep enabled.
+Optional: `TELEGRAM_CAPTION`. For AI workflows triggered manually in Actions, set `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` as needed.
 
 **Test Telegram locally:**
 
