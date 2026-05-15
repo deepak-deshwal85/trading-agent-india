@@ -6,14 +6,12 @@ analysis on Nifty 50 stocks, and uses AI (Claude / GPT) for expert-level
 investment recommendations.
 
 Usage:
-    python main.py                                  # Analyze all Nifty 50 (VADER, no AI)
+    python main.py                                  # Analyze all Nifty 50 (no AI); news = VADER+FinBERT ensemble
     python main.py --stocks RELIANCE INFY TCS       # Specific stocks
     python main.py --ai --provider anthropic          # AI via Claude (provider required)
     python main.py --ai --provider openai           # AI via GPT
-    python main.py --ai --detailed                   # AI + detailed per-stock panels
-    python main.py --finbert                         # Ensemble: VADER + FinBERT (+ optional Tone)
 
-Each successful analysis run writes a PDF and sends it via Telegram when TELEGRAM_* are set in .env (see --pdf-file).
+Each successful analysis run writes reports/market_report.pdf and sends it via Telegram when TELEGRAM_* are set in .env.
 """
 
 import argparse
@@ -72,28 +70,12 @@ def parse_args():
              "Defaults to all Nifty 50.",
     )
     parser.add_argument(
-        "--finbert", action="store_true",
-        help="Use ensemble sentiment: VADER + ProsusAI FinBERT (+ FinBERT-Tone if available).",
-    )
-    parser.add_argument(
         "--ai", action="store_true",
         help="Enable AI deep analysis (requires --provider and API key in .env).",
     )
     parser.add_argument(
         "--provider", type=str, default=None, choices=["anthropic", "openai"],
         help="AI provider: anthropic or openai (required when using --ai).",
-    )
-    parser.add_argument(
-        "--detailed", action="store_true",
-        help="Print detailed analysis panel for each stock.",
-    )
-    parser.add_argument(
-        "--skip-news", action="store_true",
-        help="Skip news fetching (faster re-runs for testing).",
-    )
-    parser.add_argument(
-        "--pdf-file", type=str, default="market_report.pdf",
-        help="PDF output path (always generated after analysis; default: market_report.pdf).",
     )
     parser.add_argument(
         "--drop-missing", action="store_true",
@@ -153,7 +135,6 @@ def main():
 
     symbols = args.stocks if args.stocks else NIFTY_50
 
-    use_finbert = args.finbert
     use_ai = args.ai
     use_llm_sentiment = (
         use_ai
@@ -247,17 +228,17 @@ def main():
         )
     elif use_ai and not config.AI_SENTIMENT_USE_LLM:
         console.print(
-            "[dim]News sentiment: VADER/FinBERT "
+            "[dim]News sentiment: VADER + FinBERT ensemble "
             "(AI_SENTIMENT_USE_LLM=false in app.env)[/]\n"
         )
 
     market_sentiments = analyze_news_sentiment(
-        market_news, use_finbert=use_finbert, use_llm=use_llm_sentiment,
+        market_news, use_llm=use_llm_sentiment,
     )
     market_sentiment_agg = aggregate_sentiment(market_sentiments)
 
     world_sentiments = analyze_news_sentiment(
-        world_news, use_finbert=use_finbert, use_llm=use_llm_sentiment,
+        world_news, use_llm=use_llm_sentiment,
     )
     world_sentiment_agg = aggregate_sentiment(world_sentiments)
 
@@ -266,7 +247,7 @@ def main():
         news_for_stock = stock_news.get(sym, [])
         if news_for_stock:
             results = analyze_news_sentiment(
-                news_for_stock, use_finbert=use_finbert, use_llm=use_llm_sentiment,
+                news_for_stock, use_llm=use_llm_sentiment,
             )
             stock_sentiment_aggs[sym] = aggregate_sentiment(results)
         else:
@@ -282,31 +263,19 @@ def main():
     fundamentals: dict[str, FundamentalData] = {}
     technicals: dict[str, TechnicalData] = {}
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Analyzing stocks...", total=len(symbols))
+    for sym in symbols:
+        fund_data = fetch_fundamentals(sym)
+        tech_data = fetch_technical(sym)
+        sent_agg = stock_sentiment_aggs.get(sym, aggregate_sentiment([]))
 
-        for sym in symbols:
-            fund_data = fetch_fundamentals(sym)
-            tech_data = fetch_technical(sym)
-            sent_agg = stock_sentiment_aggs.get(sym, aggregate_sentiment([]))
+        if fund_data:
+            fundamentals[sym] = fund_data
+        if tech_data:
+            technicals[sym] = tech_data
 
-            if fund_data:
-                fundamentals[sym] = fund_data
-            if tech_data:
-                technicals[sym] = tech_data
+        rec = generate_recommendation(sym, sent_agg, fund_data, tech_data)
+        recommendations.append(rec)
 
-            rec = generate_recommendation(sym, sent_agg, fund_data, tech_data)
-            recommendations.append(rec)
-
-            progress.update(task, advance=1)
-
-    console.print()
     md_summary, md_reports = build_market_data_report()
     print_market_data_fetch_report(md_summary, md_reports)
 
@@ -323,7 +292,7 @@ def main():
             f"[dim](from --provider)[/]\n"
             f"[dim]Deep analysis: {config.resolve_ai_model('deep')} | "
             f"News sentiment: "
-            f"{config.resolve_ai_model('fast') if use_llm_sentiment else 'VADER/FinBERT'}[/]\n"
+            f"{config.resolve_ai_model('fast') if use_llm_sentiment else 'VADER + FinBERT ensemble'}[/]\n"
         )
         market_overview, overview_err = generate_market_overview(
             recommendations, market_sentiment_agg, world_sentiment_agg,
@@ -385,17 +354,16 @@ def main():
 
     print_buy_sell_hold_lists(recommendations)
 
-    if args.detailed:
-        console.print("[bold bright_white on blue]  DETAILED STOCK ANALYSIS  [/]\n")
-        sorted_recs = sorted(recommendations, key=lambda r: r.composite_score, reverse=True)
-        for rec in sorted_recs:
-            print_detailed_stock_report(rec)
-            if rec.symbol in ai_insights:
-                print_ai_stock_insight(ai_insights[rec.symbol])
-            console.print()
+    console.print("[bold bright_white on blue]  DETAILED STOCK ANALYSIS  [/]\n")
+    sorted_recs = sorted(recommendations, key=lambda r: r.composite_score, reverse=True)
+    for rec in sorted_recs:
+        print_detailed_stock_report(rec)
+        if rec.symbol in ai_insights:
+            print_ai_stock_insight(ai_insights[rec.symbol])
+        console.print()
 
     pdf_path = generate_pdf_report(
-        output_path=args.pdf_file,
+        output_path=config.PDF_REPORT_PATH,
         recommendations=recommendations,
         market_sentiment=market_sentiment_agg,
         world_sentiment=world_sentiment_agg,

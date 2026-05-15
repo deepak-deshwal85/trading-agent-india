@@ -4,6 +4,8 @@
 #   • schedule — Monday–Friday 08:00 IST (cron is UTC → 02:30 Mon–Fri)
 #   • workflow_dispatch — manual; mirrors main.py CLI via form inputs
 #
+# PDF is always written to reports/market_report.pdf (see config.PDF_REPORT_PATH).
+#
 # Secrets when using AI / Telegram: TELEGRAM_*, ANTHROPIC_API_KEY, OPENAI_API_KEY.
 
 name: Daily market analysis
@@ -18,11 +20,6 @@ on:
         required: false
         default: ""
         type: string
-      finbert:
-        description: VADER + FinBERT ensemble sentiment
-        required: false
-        default: false
-        type: boolean
       ai:
         description: Enable AI (set API key secret for the chosen provider)
         required: false
@@ -36,21 +33,11 @@ on:
         options:
           - anthropic
           - openai
-      detailed:
-        description: Print detailed per-stock panels in the job log
-        required: false
-        default: false
-        type: boolean
       skip_news:
         description: Skip news fetching
         required: false
         default: false
         type: boolean
-      pdf_file:
-        description: PDF output path under the repo (always generated and sent to Telegram when secrets are set)
-        required: false
-        default: reports/market_report.pdf
-        type: string
       drop_missing:
         description: Drop missing/unreachable symbols before analysis
         required: false
@@ -93,9 +80,8 @@ jobs:
         run: |
           set -e
           mkdir -p reports
-          REPORT_PATH="reports/market_report.pdf"
-          python main.py --drop-missing --pdf-file "${REPORT_PATH}"
-          echo "REPORT_PATH=${REPORT_PATH}" >> "${GITHUB_ENV}"
+          echo "REPORT_PATH=reports/market_report.pdf" >> "${GITHUB_ENV}"
+          python main.py --drop-missing
 
       - name: Run main.py (manual)
         if: github.event_name == 'workflow_dispatch'
@@ -103,17 +89,15 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           I_STOCKS: ${{ github.event.inputs.stocks }}
-          I_FINBERT: ${{ github.event.inputs.finbert }}
           I_AI: ${{ github.event.inputs.ai }}
           I_PROVIDER: ${{ github.event.inputs.provider }}
-          I_DETAILED: ${{ github.event.inputs.detailed }}
           I_SKIP_NEWS: ${{ github.event.inputs.skip_news }}
-          I_PDF_FILE: ${{ github.event.inputs.pdf_file }}
           I_DROP: ${{ github.event.inputs.drop_missing }}
           I_SYM_CSV: ${{ github.event.inputs.symbol_report_csv }}
         run: |
           set -e
           mkdir -p reports
+          echo "REPORT_PATH=reports/market_report.pdf" >> "${GITHUB_ENV}"
           ARGS=()
 
           if [ "${I_DROP}" = "true" ]; then
@@ -127,25 +111,12 @@ jobs:
             ARGS+=(--stocks "${SYM_ARR[@]}")
           fi
 
-          if [ "${I_FINBERT}" = "true" ]; then
-            ARGS+=(--finbert)
-          fi
           if [ "${I_AI}" = "true" ]; then
             ARGS+=(--ai --provider "${I_PROVIDER}")
-          fi
-          if [ "${I_DETAILED}" = "true" ]; then
-            ARGS+=(--detailed)
           fi
           if [ "${I_SKIP_NEWS}" = "true" ]; then
             ARGS+=(--skip-news)
           fi
-
-          PDF_PATH="$(echo "${I_PDF_FILE}" | sed "${STRIP}")"
-          [ -z "${PDF_PATH}" ] && PDF_PATH="reports/market_report.pdf"
-          PDF_PARENT="$(dirname "${PDF_PATH}")"
-          [ -n "${PDF_PARENT}" ] && [ "${PDF_PARENT}" != "." ] && mkdir -p "${PDF_PARENT}"
-          ARGS+=(--pdf-file "${PDF_PATH}")
-          echo "REPORT_PATH=${PDF_PATH}" >> "${GITHUB_ENV}"
 
           CSV="$(echo "${I_SYM_CSV}" | sed "${STRIP}")"
           if [ -n "${CSV}" ]; then
@@ -156,13 +127,6 @@ jobs:
 
           echo "Running: python main.py" "${ARGS[@]}"
           python main.py "${ARGS[@]}"
-
-          if [ ! -f "${PDF_PATH}" ]; then
-            FOUND="$(find reports . -maxdepth 2 -name '*.pdf' -type f -print | head -1)"
-            if [ -n "${FOUND}" ]; then
-              echo "REPORT_PATH=${FOUND}" >> "${GITHUB_ENV}"
-            fi
-          fi
 
       - name: Upload PDF artifact
         if: success()

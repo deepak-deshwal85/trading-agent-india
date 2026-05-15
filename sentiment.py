@@ -1,7 +1,7 @@
 """
-Sentiment analysis for financial news using VADER (India + global lexicon),
-optional ProsusAI FinBERT, optional yiyanghkust/finbert-tone, and a
-confidence-weighted ensemble with source credibility and recency decay.
+Sentiment analysis for financial news using a VADER + ProsusAI FinBERT ensemble
+(by default), optional yiyanghkust/finbert-tone weights, source credibility,
+and recency decay. Falls back to VADER when FinBERT cannot be loaded.
 """
 
 from __future__ import annotations
@@ -362,7 +362,6 @@ def analyze_sentiment_finbert(text: str) -> SentimentResult:
 
 def analyze_news_sentiment(
     news_items: list[NewsItem],
-    use_finbert: bool = False,
     use_llm: bool = False,
 ) -> list[SentimentResult]:
     """Per-article sentiment with source × recency blend weights in aggregate."""
@@ -377,10 +376,7 @@ def analyze_news_sentiment(
         rw = recency_weight(item.published_at)
         blend_weight = round(cred * rw, 4)
 
-        if use_finbert:
-            r = analyze_sentiment_ensemble(text)
-        else:
-            r = analyze_sentiment_vader(text)
+        r = analyze_sentiment_ensemble(text)
         r.blend_weight = blend_weight
         results.append(r)
     return results

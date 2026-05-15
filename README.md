@@ -15,8 +15,7 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 - **World News** — Fed decisions, oil prices, China economy, trade wars, global markets
 
 ### Sentiment Analysis
-- **VADER** (fast, no GPU) — Enhanced with 50+ financial-domain terms (FII buying/selling, rate hike/cut, margin expansion, etc.)
-- **FinBERT** (optional, deep) — ProsusAI/finbert transformer model for financial-domain NLP
+- **Default (local)** — **VADER + ProsusAI FinBERT** ensemble (+ optional FinBERT-Tone weights from `app.env`); falls back to VADER if models fail to load
 
 ### Fundamental-style scoring (free market data)
 - Uses **yfinance** (Yahoo Finance, NSE `.NS` tickers) with **jugaad-data** (NSE) as fallback.
@@ -84,7 +83,7 @@ ANTHROPIC_MODEL_DEEP=claude-sonnet-4-6
 AI_SENTIMENT_USE_LLM=true
 ```
 
-Provider is still chosen on the CLI: `--ai --provider anthropic`. Set `AI_SENTIMENT_USE_LLM=false` in `app.env` to keep VADER/`--finbert` for news even when `--ai` is on.
+Provider is still chosen on the CLI: `--ai --provider anthropic`. Set `AI_SENTIMENT_USE_LLM=false` in `app.env` to use the **local VADER + FinBERT** ensemble for headlines instead of the fast LLM when `--ai` is on.
 
 See `.env.example` and `app.env`.
 
@@ -111,25 +110,25 @@ python main.py --ai --provider openai --stocks RELIANCE INFY TCS
 python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 ```
 
-### Full analysis with AI + detailed panels:
+### Full analysis with AI
 ```bash
-python main.py --ai --detailed --stocks RELIANCE INFY TCS
+python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 ```
 
-### PDF output path (`--pdf-file`)
-Every completed analysis writes a PDF (default `market_report.pdf`) and sends it via Telegram when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
+### PDF report (fixed path)
+Every completed analysis writes **`reports/market_report.pdf`** (`config.PDF_REPORT_PATH`) and sends it via Telegram when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set. The `reports/` folder is created automatically.
 
 ```bash
-python main.py --ai --detailed --pdf-file reports/market_report.pdf --stocks RELIANCE INFY TCS
+python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 ```
 
 ## Production Run Commands
 
 ### GitHub Actions (scheduled Mon–Fri + manual dispatch + Telegram PDF)
-The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs **Monday–Friday ~08:00 IST** and on **manual dispatch**. Default command:
+The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs **Monday–Friday ~08:00 IST** and on **manual dispatch**. Example scheduled command:
 
 ```bash
-python main.py --drop-missing --pdf-file reports/market_report.pdf
+python main.py --drop-missing
 ```
 
 Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegram bot**.
@@ -148,21 +147,19 @@ Optional: `TELEGRAM_CAPTION`. For AI in CI, enable inputs for `--ai` **and** `--
 ```powershell
 $env:TELEGRAM_BOT_TOKEN = "your-token"
 $env:TELEGRAM_CHAT_ID = "your-chat-id"
-python main.py --skip-news --stocks RELIANCE --pdf-file reports/test.pdf
-python scripts/send_telegram.py --file reports/test.pdf --caption "Test report"
+python main.py --skip-news --stocks RELIANCE
+python scripts/send_telegram.py --file reports/market_report.pdf --caption "Test report"
 ```
 
-### Full Nifty50 run (AI + PDF, dated filename)
+### Full Nifty50 run (AI)
 **PowerShell**
 ```powershell
-$ts = Get-Date -Format "yyyyMMdd_HHmm"
-python main.py --ai --provider openai --pdf-file "reports/nifty50_$ts.pdf"
+python main.py --ai --provider openai
 ```
 
 ### Faster run (skip market news fetch, still computes stocks + AI)
 ```powershell
-$ts = Get-Date -Format "yyyyMMdd_HHmm"
-python main.py --ai --provider openai --skip-news --pdf-file "reports/nifty50_fast_$ts.pdf"
+python main.py --ai --provider openai --skip-news
 ```
 
 ### Health check before scheduled run
@@ -177,7 +174,7 @@ Expected output:
 ### Auto-drop missing symbols and continue run
 ```powershell
 # Drop missing/unreachable symbols, continue analysis with valid symbols only
-python main.py --ai --drop-missing --pdf-file reports/market_after_drop.pdf
+python main.py --ai --drop-missing
 ```
 
 ### Save validation report to CSV (then continue full analysis)
@@ -194,12 +191,12 @@ powershell.exe
 ```
 Arguments:
 ```text
--NoProfile -ExecutionPolicy Bypass -Command "$ts = Get-Date -Format 'yyyyMMdd_HHmm'; cd 'C:\Users\Swati\trading-agent-india'; python main.py --ai --provider openai --pdf-file ('reports/nifty50_'+$ts+'.pdf')"
+-NoProfile -ExecutionPolicy Bypass -Command "cd 'C:\Users\Swati\trading-agent-india'; python main.py --ai --provider openai"
 ```
 
-### Use FinBERT + AI for maximum accuracy:
+### AI on a small universe (faster API spend)
 ```bash
-python main.py --finbert --ai --stocks RELIANCE INFY TCS
+python main.py --ai --stocks RELIANCE INFY TCS
 ```
 
 ### Skip news (faster, for testing):
@@ -255,7 +252,7 @@ The system produces a color-coded terminal report with:
 4. Full recommendation table (sorted by composite score)
 5. Algo vs AI comparison table (with `--ai`)
 6. Categorized Buy / Hold / Sell lists
-7. Detailed per-stock analysis with AI investment thesis (with `--detailed`)
+7. Detailed per-stock panels (algo always; AI thesis when `--ai`)
 
 ## Disclaimer
 
@@ -269,8 +266,7 @@ This tool is for **educational and informational purposes only**. It does NOT co
 | Stock Data | yfinance + jugaad-data (NSE) |
 | Technical Analysis | pandas_ta |
 | News Aggregation | feedparser, requests, BeautifulSoup |
-| Sentiment (Fast) | VADER + Financial Lexicon |
-| Sentiment (Deep) | FinBERT (ProsusAI/finbert) |
+| Sentiment (default) | VADER + FinBERT ensemble (+ optional Tone); LLM batch when `--ai` + `AI_SENTIMENT_USE_LLM` |
 | AI Analysis | Anthropic Claude / OpenAI GPT (configurable) |
 | Configuration | python-dotenv (.env file) |
 | Output | Rich (tables, panels, colors) |

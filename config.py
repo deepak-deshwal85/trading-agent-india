@@ -139,6 +139,9 @@ HEADERS = {
 MAX_NEWS_PER_SOURCE = 15
 REQUEST_TIMEOUT = 15
 
+# Fixed PDF output path (always written after analysis)
+PDF_REPORT_PATH = "reports/market_report.pdf"
+
 
 def resolve_ai_model(tier: str = "deep") -> str:
     """Return model id for CLI provider and tier: 'fast' (Haiku) or 'deep' (Sonnet)."""
