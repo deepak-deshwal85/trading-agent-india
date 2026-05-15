@@ -89,7 +89,7 @@ See `.env.example` and `app.env`.
 
 ## Usage
 
-### Basic — Analyze all Nifty 50 stocks (VADER sentiment, no AI):
+### Basic — Analyze all Nifty 50 stocks (local sentiment ensemble, no AI):
 ```bash
 python main.py
 ```
@@ -128,7 +128,7 @@ python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs **Monday–Friday ~08:00 IST** and on **manual dispatch**. Example scheduled command:
 
 ```bash
-python main.py --drop-missing
+python main.py
 ```
 
 Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegram bot**.
@@ -147,7 +147,7 @@ Optional: `TELEGRAM_CAPTION`. For AI in CI, enable inputs for `--ai` **and** `--
 ```powershell
 $env:TELEGRAM_BOT_TOKEN = "your-token"
 $env:TELEGRAM_CHAT_ID = "your-chat-id"
-python main.py --skip-news --stocks RELIANCE
+python main.py --stocks RELIANCE
 python scripts/send_telegram.py --file reports/market_report.pdf --caption "Test report"
 ```
 
@@ -155,11 +155,6 @@ python scripts/send_telegram.py --file reports/market_report.pdf --caption "Test
 **PowerShell**
 ```powershell
 python main.py --ai --provider openai
-```
-
-### Faster run (skip market news fetch, still computes stocks + AI)
-```powershell
-python main.py --ai --provider openai --skip-news
 ```
 
 ### Health check before scheduled run
@@ -171,18 +166,13 @@ Expected output:
 (True, 'Market data OK (yfinance).')
 ```
 
-### Auto-drop missing symbols and continue run
-```powershell
-# Drop missing/unreachable symbols, continue analysis with valid symbols only
-python main.py --ai --drop-missing
-```
+### Save validation report to CSV (optional)
+Writes symbol status from a quick validation pass; **the full run still analyzes every requested symbol**. Per-symbol data fetch issues are also summarized in the PDF.
 
-### Save validation report to CSV (then continue full analysis)
 ```powershell
 python main.py --symbol-report-csv reports/symbol_validation.csv
 python main.py --symbol-report-csv auto
 ```
-Use with `--drop-missing` to filter to valid symbols after writing the CSV.
 
 ### Windows Task Scheduler action example
 Program/script:
@@ -197,11 +187,6 @@ Arguments:
 ### AI on a small universe (faster API spend)
 ```bash
 python main.py --ai --stocks RELIANCE INFY TCS
-```
-
-### Skip news (faster, for testing):
-```bash
-python main.py --skip-news --stocks RELIANCE
 ```
 
 ## Architecture

@@ -5,6 +5,7 @@
 #   • workflow_dispatch — manual; mirrors main.py CLI via form inputs
 #
 # PDF is always written to reports/market_report.pdf (see config.PDF_REPORT_PATH).
+# News is always fetched; symbols are never dropped — failures appear in PDF/market-data reporting.
 #
 # Secrets when using AI / Telegram: TELEGRAM_*, ANTHROPIC_API_KEY, OPENAI_API_KEY.
 
@@ -33,16 +34,6 @@ on:
         options:
           - anthropic
           - openai
-      skip_news:
-        description: Skip news fetching
-        required: false
-        default: false
-        type: boolean
-      drop_missing:
-        description: Drop missing/unreachable symbols before analysis
-        required: false
-        default: true
-        type: boolean
       symbol_report_csv:
         description: Optional symbol validation CSV path (or "auto"); empty = off
         required: false
@@ -81,7 +72,7 @@ jobs:
           set -e
           mkdir -p reports
           echo "REPORT_PATH=reports/market_report.pdf" >> "${GITHUB_ENV}"
-          python main.py --drop-missing
+          python main.py
 
       - name: Run main.py (manual)
         if: github.event_name == 'workflow_dispatch'
@@ -91,18 +82,12 @@ jobs:
           I_STOCKS: ${{ github.event.inputs.stocks }}
           I_AI: ${{ github.event.inputs.ai }}
           I_PROVIDER: ${{ github.event.inputs.provider }}
-          I_SKIP_NEWS: ${{ github.event.inputs.skip_news }}
-          I_DROP: ${{ github.event.inputs.drop_missing }}
           I_SYM_CSV: ${{ github.event.inputs.symbol_report_csv }}
         run: |
           set -e
           mkdir -p reports
           echo "REPORT_PATH=reports/market_report.pdf" >> "${GITHUB_ENV}"
           ARGS=()
-
-          if [ "${I_DROP}" = "true" ]; then
-            ARGS+=(--drop-missing)
-          fi
 
           STRIP='s/^[[:space:]]*//; s/[[:space:]]*$//'
           STOCKS="$(echo "${I_STOCKS}" | sed "${STRIP}")"
@@ -113,9 +98,6 @@ jobs:
 
           if [ "${I_AI}" = "true" ]; then
             ARGS+=(--ai --provider "${I_PROVIDER}")
-          fi
-          if [ "${I_SKIP_NEWS}" = "true" ]; then
-            ARGS+=(--skip-news)
           fi
 
           CSV="$(echo "${I_SYM_CSV}" | sed "${STRIP}")"

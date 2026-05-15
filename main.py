@@ -78,12 +78,8 @@ def parse_args():
         help="AI provider: anthropic or openai (required when using --ai).",
     )
     parser.add_argument(
-        "--drop-missing", action="store_true",
-        help="Validate symbols first and auto-drop missing/unreachable symbols from analysis.",
-    )
-    parser.add_argument(
         "--symbol-report-csv", type=str, default=None,
-        help="Run yfinance/jugaad validation first and save status CSV (analysis continues unless --drop-missing).",
+        help='Optional: run yfinance/jugaad validation and save CSV (path or "auto"); analysis uses full symbol list.',
     )
     args = parser.parse_args()
     if args.ai and not args.provider:
@@ -173,7 +169,7 @@ def main():
     if not ok:
         console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
 
-    if args.drop_missing or args.symbol_report_csv:
+    if args.symbol_report_csv:
         console.print("[bold cyan]Symbol data validation[/bold cyan]")
         result = validate_symbols(symbols)
         ok_syms = result["ok"]
@@ -191,17 +187,9 @@ def main():
             console.print("[red]Unreachable/Error symbols:[/] " + ", ".join(bad_syms))
             console.print(
                 "[dim]Hint: confirm NSE symbol spelling (e.g. M&M, BAJAJ-AUTO); "
-                "install yfinance and jugaad-data.[/dim]"
+                "install yfinance and jugaad-data. Per-symbol fetch issues are also in the PDF/market-data section.[/dim]"
             )
-        if args.symbol_report_csv:
-            _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
-
-        if args.drop_missing:
-            symbols = ok_syms
-            if not symbols:
-                console.print("[bold red]No valid symbols left after dropping missing/unreachable symbols.[/bold red]")
-                return
-            console.print(f"[green]Proceeding with {len(symbols)} valid symbols after drop.[/green]\n")
+        _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
 
     print_header()
     print_disclaimer()
@@ -209,14 +197,9 @@ def main():
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 1: News Aggregation
     # ══════════════════════════════════════════════════════════════════════════
-    market_news: list[NewsItem] = []
-    world_news: list[NewsItem] = []
-    stock_news: dict[str, list[NewsItem]] = {}
-
-    if not args.skip_news:
-        market_news = fetch_all_market_news()
-        world_news = fetch_world_news()
-        stock_news = fetch_stock_specific_news(symbols)
+    market_news = fetch_all_market_news()
+    world_news = fetch_world_news()
+    stock_news = fetch_stock_specific_news(symbols)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 2: Sentiment Analysis
