@@ -18,7 +18,6 @@ import argparse
 import sys
 import time
 import os
-import csv
 from datetime import datetime
 from pathlib import Path
 
@@ -34,7 +33,6 @@ from config import (
 )
 from market_data import (
     check_market_data_auth,
-    validate_symbols,
     reset_fetch_reports,
     build_market_data_report,
 )
@@ -76,10 +74,6 @@ def parse_args():
     parser.add_argument(
         "--provider", type=str, default=None, choices=["anthropic", "openai"],
         help="AI provider: anthropic or openai (required when using --ai).",
-    )
-    parser.add_argument(
-        "--symbol-report-csv", type=str, default=None,
-        help='Optional: run yfinance/jugaad validation and save CSV (path or "auto"); analysis uses full symbol list.',
     )
     args = parser.parse_args()
     if args.ai and not args.provider:
@@ -138,58 +132,10 @@ def main():
         and bool(config.AI_PROVIDER)
     )
 
-    def _write_symbol_report_csv(path: str, base_symbols: list[str], result: dict[str, list[str]]):
-        rows = []
-        status_map = {}
-        for s in result.get("ok", []):
-            status_map[s] = "ok"
-        for s in result.get("missing", []):
-            status_map[s] = "missing"
-        for s in result.get("unreachable", []):
-            status_map[s] = "unreachable"
-        for s in base_symbols:
-            rows.append({"symbol": s, "status": status_map.get(s, "unknown")})
-
-        out_path = path
-        if out_path.lower() == "auto":
-            ts = datetime.now().strftime("%Y%m%d_%H%M")
-            out_path = f"reports/symbol_validation_{ts}.csv"
-        out_dir = os.path.dirname(out_path)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
-
-        with open(out_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["symbol", "status"])
-            writer.writeheader()
-            writer.writerows(rows)
-        console.print(f"[green]Symbol validation CSV saved:[/] {os.path.abspath(out_path)}")
-
     provider_name = config.AI_PROVIDER
     ok, msg = check_market_data_auth()
     if not ok:
         console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
-
-    if args.symbol_report_csv:
-        console.print("[bold cyan]Symbol data validation[/bold cyan]")
-        result = validate_symbols(symbols)
-        ok_syms = result["ok"]
-        missing_syms = result["missing"]
-        bad_syms = result["unreachable"]
-
-        console.print(
-            f"[green]Valid:[/] {len(ok_syms)}  "
-            f"[yellow]Missing:[/] {len(missing_syms)}  "
-            f"[red]Unreachable/Error:[/] {len(bad_syms)}"
-        )
-        if missing_syms:
-            console.print("[yellow]Missing symbols:[/] " + ", ".join(missing_syms))
-        if bad_syms:
-            console.print("[red]Unreachable/Error symbols:[/] " + ", ".join(bad_syms))
-            console.print(
-                "[dim]Hint: confirm NSE symbol spelling (e.g. M&M, BAJAJ-AUTO); "
-                "install yfinance and jugaad-data. Per-symbol fetch issues are also in the PDF/market-data section.[/dim]"
-            )
-        _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
 
     print_header()
     print_disclaimer()

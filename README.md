@@ -131,7 +131,7 @@ The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-an
 python main.py
 ```
 
-Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegram bot**.
+Then it **uploads the PDF** as a workflow artifact and **sends it** to your Telegram bot.
 
 **Required repo secrets** (Settings → Secrets and variables → Actions):
 
@@ -164,14 +164,6 @@ python -c "from market_data import check_market_data_auth; print(check_market_da
 Expected output:
 ```text
 (True, 'Market data OK (yfinance).')
-```
-
-### Save validation report to CSV (optional)
-Writes symbol status from a quick validation pass; **the full run still analyzes every requested symbol**. Per-symbol data fetch issues are also summarized in the PDF.
-
-```powershell
-python main.py --symbol-report-csv reports/symbol_validation.csv
-python main.py --symbol-report-csv auto
 ```
 
 ### Windows Task Scheduler action example

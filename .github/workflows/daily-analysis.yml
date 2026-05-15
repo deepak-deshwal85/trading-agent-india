@@ -4,8 +4,7 @@
 #   • schedule — Monday–Friday 08:00 IST (cron is UTC → 02:30 Mon–Fri)
 #   • workflow_dispatch — manual; mirrors main.py CLI via form inputs
 #
-# PDF is always written to reports/market_report.pdf (see config.PDF_REPORT_PATH).
-# News is always fetched; symbols are never dropped — failures appear in PDF/market-data reporting.
+# PDF: reports/market_report.pdf. News is always fetched; symbols are never dropped from the run list.
 #
 # Secrets when using AI / Telegram: TELEGRAM_*, ANTHROPIC_API_KEY, OPENAI_API_KEY.
 
@@ -34,11 +33,6 @@ on:
         options:
           - anthropic
           - openai
-      symbol_report_csv:
-        description: Optional symbol validation CSV path (or "auto"); empty = off
-        required: false
-        default: ""
-        type: string
 
 concurrency:
   group: daily-analysis-${{ github.ref }}
@@ -82,7 +76,6 @@ jobs:
           I_STOCKS: ${{ github.event.inputs.stocks }}
           I_AI: ${{ github.event.inputs.ai }}
           I_PROVIDER: ${{ github.event.inputs.provider }}
-          I_SYM_CSV: ${{ github.event.inputs.symbol_report_csv }}
         run: |
           set -e
           mkdir -p reports
@@ -98,13 +91,6 @@ jobs:
 
           if [ "${I_AI}" = "true" ]; then
             ARGS+=(--ai --provider "${I_PROVIDER}")
-          fi
-
-          CSV="$(echo "${I_SYM_CSV}" | sed "${STRIP}")"
-          if [ -n "${CSV}" ]; then
-            CSV_PARENT="$(dirname "${CSV}")"
-            [ -n "${CSV_PARENT}" ] && [ "${CSV_PARENT}" != "." ] && mkdir -p "${CSV_PARENT}"
-            ARGS+=(--symbol-report-csv "${CSV}")
           fi
 
           echo "Running: python main.py" "${ARGS[@]}"

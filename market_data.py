@@ -356,17 +356,3 @@ def check_market_data_auth(sample_symbol: str = "RELIANCE") -> tuple[bool, str]:
         )
     return False, f"Could not fetch history for {sym}."
 
-
-def validate_symbols(symbols: list[str]) -> dict[str, list[str]]:
-    reset_fetch_reports()
-    out: dict[str, list[str]] = {"ok": [], "missing": [], "unreachable": []}
-    for sym in symbols:
-        try:
-            h = fetch_daily_history(sym, days=25)
-            if h is not None and not h.empty and "Close" in h.columns:
-                out["ok"].append(sym)
-            else:
-                out["missing"].append(sym)
-        except Exception:
-            out["unreachable"].append(sym)
-    return out
