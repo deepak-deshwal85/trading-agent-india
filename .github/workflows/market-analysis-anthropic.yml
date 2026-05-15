@@ -1,0 +1,100 @@
+# Anthropic AI — news + fundamentals + technicals + AI + PDF → Telegram.
+#
+# Triggers:
+#   • schedule — Monday–Friday 08:00 IST (cron UTC → 02:30 Mon–Fri)
+#   • workflow_dispatch — manual; optional stock list
+
+name: Market analysis (Anthropic AI)
+
+on:
+  schedule:
+    - cron: "30 2 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      stocks:
+        description: Space-separated NSE symbols (empty = full Nifty 50). E.g. RELIANCE INFY TCS
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: market-analysis-anthropic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run main.py (scheduled)
+        if: github.event_name == 'schedule'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -e
+          mkdir -p reports
+          echo "REPORT_PATH=reports/market_report.pdf" >> "${GITHUB_ENV}"
+          python main.py --ai --provider anthropic
+
+      - name: Run main.py (manual)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          I_STOCKS: ${{ github.event.inputs.stocks }}
+        run: |
+          set -e
+          mkdir -p reports
+          echo "REPORT_PATH=reports/market_report.pdf" >> "${GITHUB_ENV}"
+          ARGS=(--ai --provider anthropic)
+
+          STRIP='s/^[[:space:]]*//; s/[[:space:]]*$//'
+          STOCKS="$(echo "${I_STOCKS}" | sed "${STRIP}")"
+          if [ -n "${STOCKS}" ]; then
+            read -ra SYM_ARR <<< "${STOCKS}"
+            ARGS+=(--stocks "${SYM_ARR[@]}")
+          fi
+
+          echo "Running: python main.py" "${ARGS[@]}"
+          python main.py "${ARGS[@]}"
+
+      - name: Upload PDF artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-report-anthropic-${{ github.run_id }}
+          path: reports/*.pdf
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Send PDF to Telegram
+        if: success() && env.REPORT_PATH != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CAPTION: ${{ secrets.TELEGRAM_CAPTION }}
+          REPORT_PATH: ${{ env.REPORT_PATH }}
+        run: |
+          set -e
+          if [ ! -f "${REPORT_PATH}" ]; then
+            echo "Telegram skipped: REPORT_PATH does not exist or is empty."
+            exit 0
+          fi
+          TS="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          CAPTION="${TELEGRAM_CAPTION:-Indian Market Advisory — ${TS}}"
+          python scripts/send_telegram.py --file "${REPORT_PATH}" --caption "${CAPTION}"

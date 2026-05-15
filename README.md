@@ -124,14 +124,17 @@ python main.py --ai --provider anthropic --stocks RELIANCE INFY TCS
 
 ## Production Run Commands
 
-### GitHub Actions (scheduled Mon–Fri + manual dispatch + Telegram PDF)
-The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs **Monday–Friday ~08:00 IST** and on **manual dispatch**. Example scheduled command:
+### GitHub Actions (three workflows + Telegram PDF)
 
-```bash
-python main.py
-```
+There are **three** workflows under [`.github/workflows/`](.github/workflows/), each with **`workflow_dispatch`** (manual run) plus its own schedule:
 
-Then it **uploads the PDF** as a workflow artifact and **sends it** to your Telegram bot.
+| Workflow | Schedule | Command |
+|----------|----------|---------|
+| [`market-analysis-no-ai.yml`](.github/workflows/market-analysis-no-ai.yml) | Every **6 hours** on **IST** wall clock (midnight, 06:00, 12:00, 18:00 IST; expressed as cron in UTC) | `python main.py` |
+| [`market-analysis-anthropic.yml`](.github/workflows/market-analysis-anthropic.yml) | **Monday–Friday ~08:00 IST** | `python main.py --ai --provider anthropic` |
+| [`market-analysis-openai.yml`](.github/workflows/market-analysis-openai.yml) | **Monday–Friday ~08:00 IST** | `python main.py --ai --provider openai` |
+
+Each run **uploads the PDF** artifact and **sends it** via Telegram when secrets are set. If both AI workflows stay enabled on the same cron, you get **two** reports at that time—disable the workflow you do not use (repository **Actions** tab → workflow → ⋯ → disable).
 
 **Required repo secrets** (Settings → Secrets and variables → Actions):
 
@@ -140,7 +143,7 @@ Then it **uploads the PDF** as a workflow artifact and **sends it** to your Tele
 | `TELEGRAM_BOT_TOKEN` | Create a bot with [@BotFather](https://t.me/BotFather), copy the token |
 | `TELEGRAM_CHAT_ID` | Message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id":...}` |
 
-Optional: `TELEGRAM_CAPTION`. For AI in CI, enable inputs for `--ai` **and** `--provider anthropic` or `--provider openai`, plus matching API key secrets.
+Optional: `TELEGRAM_CAPTION`. For scheduled AI runs, set `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` to match the workflows you keep enabled.
 
 **Test Telegram locally:**
 
