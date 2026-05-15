@@ -33,7 +33,7 @@ from config import (
     SUPERTREND_MULTIPLIER,
     ADX_GATE_THRESHOLD,
 )
-from openalgo_data import fetch_daily_history
+from market_data import fetch_daily_history
 
 # Category weights for 0–100 technical score (sum = 1.0)
 _W_TREND = 0.30

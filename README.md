@@ -18,8 +18,8 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 - **VADER** (fast, no GPU) — Enhanced with 50+ financial-domain terms (FII buying/selling, rate hike/cut, margin expansion, etc.)
 - **FinBERT** (optional, deep) — ProsusAI/finbert transformer model for financial-domain NLP
 
-### Fundamental-style scoring (OpenAlgo)
-- Uses **OpenAlgo** daily history + live **quotes** (your Zerodha/broker feed — no Yahoo Finance).
+### Fundamental-style scoring (free market data)
+- Uses **yfinance** (Yahoo Finance, NSE `.NS` tickers) with **jugaad-data** (NSE) as fallback.
 - 52-week range, price momentum (~6M), volume vs 20-day average, plus optional AI context.
 - Classic P/E, ROE, etc. are **not** available from the broker API here; scoring is **market-data-driven**.
 
@@ -51,9 +51,8 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 
 ### Prerequisites
 - Python 3.10+
-- **[OpenAlgo](https://docs.openalgo.in)** running (e.g. `http://127.0.0.1:5000`) with broker (e.g. Zerodha) connected
-- `OPENALGO_API_KEY` from the OpenAlgo app (required for prices & history)
-- Internet connection (news + AI)
+- Internet connection (news, market data, optional AI)
+- No broker API keys — prices via **yfinance** / **jugaad-data**
 - Anthropic and/or OpenAI API key (optional, for `--ai`)
 
 ### Installation
@@ -78,13 +77,7 @@ OPENAI_API_KEY=sk-proj-...
 # ANTHROPIC_MODEL=claude-sonnet-4-20250514
 # OPENAI_MODEL=gpt-4o
 
-# OpenAlgo (market data)
-OPENALGO_API_KEY=your_openalgo_api_key
-OPENALGO_HOST=http://127.0.0.1:5000
-OPENALGO_USERNAME=your_login_username
-OPENALGO_EXCHANGE=NSE
-# Use "db" if you rely on OpenAlgo Historify/DuckDB for daily candles
-# OPENALGO_HISTORY_SOURCE=api
+# Market data: yfinance + jugaad-data — no keys required
 ```
 
 See also `.env.example`.
@@ -139,16 +132,16 @@ python main.py --ai --provider openai --skip-news --pdf --pdf-file "reports/nift
 
 ### Health check before scheduled run
 ```powershell
-python -c "from openalgo_data import check_openalgo_auth; print(check_openalgo_auth())"
+python -c "from market_data import check_market_data_auth; print(check_market_data_auth())"
 ```
 Expected output:
 ```text
-(True, 'OpenAlgo authentication OK.')
+(True, 'Market data OK (yfinance).')
 ```
 
 ### Validate symbol availability before full run
 ```powershell
-# Validate Nifty50 against OpenAlgo
+# Validate Nifty50 (yfinance / jugaad-data)
 python main.py --validate-symbols
 
 # Validate custom symbols
@@ -216,9 +209,9 @@ python main.py --skip-news --stocks RELIANCE
 │  │ World News   │  │ fundamental  │  │recommendation │             │
 │  └──────────────┘  │    .py       │  │    .py        │             │
 │                     │              │  │               │             │
-│  ┌──────────────┐  │ OpenAlgo     │  │ Weighted      │             │
-│  │  config.py   │  │ P/E, ROE     │  │ scoring       │             │
-│  │  .env        │  │ Growth, Debt │  │ Buy/Sell/Hold │             │
+│  ┌──────────────┐  │ yfinance /   │  │ Weighted      │             │
+│  │  config.py   │  │ jugaad-data  │  │ scoring       │             │
+│  │  .env        │  │ price-driven │  │ Buy/Sell/Hold │             │
 │  │              │  └──────────────┘  │ Confidence    │             │
 │  │ AI Provider  │                    └───────────────┘             │
 │  │ API Keys     │  ┌──────────────┐                                │
@@ -254,7 +247,7 @@ This tool is for **educational and informational purposes only**. It does NOT co
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.10+ |
-| Stock Data | OpenAlgo (broker API) |
+| Stock Data | yfinance + jugaad-data (NSE) |
 | Technical Analysis | pandas_ta |
 | News Aggregation | feedparser, requests, BeautifulSoup |
 | Sentiment (Fast) | VADER + Financial Lexicon |

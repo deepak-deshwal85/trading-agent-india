@@ -65,16 +65,10 @@ def _sentiment_color(label: str) -> str:
     return {"Bullish": "green", "Bearish": "red", "Neutral": "yellow"}.get(label, "white")
 
 
-def print_header(holdings_mode: bool = False, holdings_source: str | None = None):
+def print_header():
     header = Text()
     header.append("  INDIAN MARKET STOCK ADVISORY SYSTEM  ", style="bold white on blue")
     header.append("\n")
-    if holdings_mode and holdings_source:
-        header.append("  Mode: Portfolio holdings analysis  ", style="bold cyan")
-        header.append("\n")
-        header.append("  Source: ", style="dim")
-        header.append(f"{holdings_source}  ", style="dim italic")
-        header.append("\n")
     header.append(f"  Report Generated: {datetime.now().strftime('%d %B %Y, %I:%M %p IST')}  ",
                   style="dim")
     console.print(Panel(header, border_style="blue", box=box.DOUBLE))
@@ -382,7 +376,7 @@ def print_ai_comparison_table(recommendations: list[Recommendation],
 
 def print_footer():
     console.print(
-        "[dim]Powered by: OpenAlgo (broker data), pandas_ta, VADER/FinBERT ensemble, Anthropic Claude / OpenAI GPT, "
+        "[dim]Powered by: yfinance / jugaad-data (NSE), pandas_ta, VADER/FinBERT ensemble, Anthropic / OpenAI, "
         "Google News RSS, Zerodha Pulse, ET Markets, MoneyControl, LiveMint[/dim]"
     )
     console.print("[dim]Data may be delayed. Use at your own risk.[/dim]")

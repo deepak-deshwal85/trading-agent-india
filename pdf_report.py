@@ -19,7 +19,7 @@ from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.lineplots import LinePlot
 
-from openalgo_data import fetch_daily_history
+from market_data import fetch_daily_history
 
 from recommendation import Recommendation
 from news_fetcher import NewsItem

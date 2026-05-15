@@ -13,7 +13,6 @@ Usage:
     python main.py --ai --detailed                   # AI + detailed per-stock panels
     python main.py --top 10                          # Show top/bottom 10 only
     python main.py --finbert                         # Ensemble: VADER + FinBERT (+ optional Tone)
-    python main.py --holdings                       # Symbols from your broker via OpenAlgo
 """
 
 import argparse
@@ -24,12 +23,8 @@ from datetime import datetime
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from config import (
-    NIFTY_50,
-    AI_PROVIDER,
-    OPENALGO_API_KEY,
-    HOLDINGS_INCLUDE_OPENALGO_POSITIONS,
-)
+from config import NIFTY_50, AI_PROVIDER
+from market_data import check_market_data_auth, validate_symbols
 from news_fetcher import (
     fetch_all_market_news, fetch_world_news,
     fetch_stock_specific_news, NewsItem,
@@ -43,7 +38,6 @@ from ai_analyzer import (
     AIInsight, MarketOverview,
 )
 from pdf_report import generate_pdf_report
-from openalgo_data import check_openalgo_auth, validate_symbols, fetch_broker_holdings_symbols
 from report import (
     console, print_header, print_market_sentiment,
     print_top_news, print_recommendation_summary,
@@ -61,14 +55,7 @@ def parse_args():
     parser.add_argument(
         "--stocks", nargs="+", default=None,
         help="Specific stock symbols to analyze (e.g., RELIANCE INFY TCS). "
-             "Defaults to all Nifty 50 unless --holdings is used.",
-    )
-    parser.add_argument(
-        "--holdings",
-        action="store_true",
-        help="Analyze symbols from your broker via OpenAlgo (holdings(); optionally "
-             "positionbook() when HOLDINGS_INCLUDE_OPENALGO_POSITIONS=true). "
-             "Requires OPENALGO_API_KEY. Incompatible with --stocks.",
+             "Defaults to all Nifty 50.",
     )
     parser.add_argument(
         "--top", type=int, default=None,
@@ -104,7 +91,7 @@ def parse_args():
     )
     parser.add_argument(
         "--validate-symbols", action="store_true",
-        help="Validate symbols against OpenAlgo and exit (no analysis run).",
+        help="Validate symbols (yfinance / jugaad-data) and exit (no analysis run).",
     )
     parser.add_argument(
         "--drop-missing", action="store_true",
@@ -114,10 +101,7 @@ def parse_args():
         "--symbol-report-csv", type=str, default=None,
         help="Optional CSV path to save symbol validation result (status per symbol).",
     )
-    args = parser.parse_args()
-    if args.stocks and args.holdings:
-        parser.error("Choose either --stocks SYMBOLS … or --holdings, not both.")
-    return args
+    return parser.parse_args()
 
 
 def main():
@@ -132,39 +116,7 @@ def main():
         import ai_analyzer
         ai_analyzer.AI_PROVIDER = args.provider  # noqa — runtime override
 
-    holdings_source: str | None = None
-    if args.holdings:
-        if not OPENALGO_API_KEY:
-            console.print(
-                "[bold red]--holdings requires OPENALGO_API_KEY in .env[/] "
-                "and a running OpenAlgo server with an active broker session.\n"
-            )
-            return
-        try:
-            symbols = fetch_broker_holdings_symbols()
-        except RuntimeError as e:
-            console.print(f"[bold red]{e}[/bold red]")
-            return
-        except ValueError as e:
-            console.print(f"[bold red]{e}[/bold red]")
-            return
-        except Exception as e:
-            console.print(f"[bold red]Could not load broker holdings from OpenAlgo:[/] {e}")
-            return
-        src_detail = (
-            "holdings + position book"
-            if HOLDINGS_INCLUDE_OPENALGO_POSITIONS
-            else "holdings only"
-        )
-        holdings_source = f"OpenAlgo broker API ({src_detail})"
-        console.print(
-            f"[bold cyan]Holdings mode (broker):[/] {len(symbols)} symbol(s) via "
-            f"[green]OpenAlgo[/green] — [dim]{src_detail}[/dim]\n"
-        )
-    elif args.stocks:
-        symbols = args.stocks
-    else:
-        symbols = NIFTY_50
+    symbols = args.stocks if args.stocks else NIFTY_50
 
     use_finbert = args.finbert
     use_ai = args.ai
@@ -199,49 +151,46 @@ def main():
     if use_ai:
         console.print(f"[bold bright_magenta]AI Mode: ON  |  Provider: {provider_name.upper()}[/]\n")
 
-    if not OPENALGO_API_KEY:
-        console.print(
-            "[bold red]OPENALGO_API_KEY is missing in .env.[/] "
-            "Market data (technicals, fundamentals, PDF sparklines) requires a running OpenAlgo server and API key.\n"
-        )
+    ok, msg = check_market_data_auth()
+    if ok:
+        console.print(f"[dim]Market data: {msg}[/dim]\n")
     else:
-        ok, msg = check_openalgo_auth()
-        if not ok:
-            console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
+        console.print(f"[bold yellow][warn][/bold yellow] {msg}\n")
 
-        if args.validate_symbols or args.drop_missing:
-            console.print("[bold cyan]OpenAlgo Symbol Validation[/bold cyan]")
-            result = validate_symbols(symbols)
-            ok_syms = result["ok"]
-            missing_syms = result["missing"]
-            bad_syms = result["unreachable"]
+    if args.validate_symbols or args.drop_missing:
+        console.print("[bold cyan]Symbol data validation[/bold cyan]")
+        result = validate_symbols(symbols)
+        ok_syms = result["ok"]
+        missing_syms = result["missing"]
+        bad_syms = result["unreachable"]
 
+        console.print(
+            f"[green]Valid:[/] {len(ok_syms)}  "
+            f"[yellow]Missing:[/] {len(missing_syms)}  "
+            f"[red]Unreachable/Error:[/] {len(bad_syms)}"
+        )
+        if missing_syms:
+            console.print("[yellow]Missing symbols:[/] " + ", ".join(missing_syms))
+        if bad_syms:
+            console.print("[red]Unreachable/Error symbols:[/] " + ", ".join(bad_syms))
             console.print(
-                f"[green]Valid:[/] {len(ok_syms)}  "
-                f"[yellow]Missing:[/] {len(missing_syms)}  "
-                f"[red]Unreachable/Error:[/] {len(bad_syms)}"
+                "[dim]Hint: confirm NSE symbol spelling (e.g. M&M, BAJAJ-AUTO); "
+                "install yfinance and jugaad-data.[/dim]"
             )
-            if missing_syms:
-                console.print("[yellow]Missing symbols:[/] " + ", ".join(missing_syms))
-            if bad_syms:
-                console.print("[red]Unreachable/Error symbols:[/] " + ", ".join(bad_syms))
-                console.print(
-                    "[dim]Hint: If many symbols are unreachable, refresh broker access token in OpenAlgo dashboard.[/dim]"
-                )
-            if args.symbol_report_csv:
-                _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
+        if args.symbol_report_csv:
+            _write_symbol_report_csv(args.symbol_report_csv, symbols, result)
 
-            if args.validate_symbols:
+        if args.validate_symbols:
+            return
+
+        if args.drop_missing:
+            symbols = ok_syms
+            if not symbols:
+                console.print("[bold red]No valid symbols left after dropping missing/unreachable symbols.[/bold red]")
                 return
+            console.print(f"[green]Proceeding with {len(symbols)} valid symbols after drop.[/green]\n")
 
-            if args.drop_missing:
-                symbols = ok_syms
-                if not symbols:
-                    console.print("[bold red]No valid symbols left after dropping missing/unreachable symbols.[/bold red]")
-                    return
-                console.print(f"[green]Proceeding with {len(symbols)} valid symbols after drop.[/green]\n")
-
-    print_header(holdings_mode=holdings_source is not None, holdings_source=holdings_source)
+    print_header()
     print_disclaimer()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -395,10 +344,6 @@ def main():
 
         console.print(f"\n[green]  AI analysis complete for {len(ai_insights)}/{len(symbols)} stocks[/green]\n")
 
-    rec_table_title = (
-        "PORTFOLIO HOLDINGS — RECOMMENDATIONS SUMMARY" if holdings_source else None
-    )
-
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 6: Generate Report
     # ══════════════════════════════════════════════════════════════════════════
@@ -408,10 +353,10 @@ def main():
         bottom_n = sorted_recs[-args.top:]
         display_recs = list({r.symbol: r for r in (top_n + bottom_n)}.values())
         display_recs.sort(key=lambda r: r.composite_score, reverse=True)
-        print_recommendation_summary(display_recs, title=rec_table_title)
+        print_recommendation_summary(display_recs)
     else:
         display_recs = recommendations
-        print_recommendation_summary(recommendations, title=rec_table_title)
+        print_recommendation_summary(recommendations)
 
     if ai_insights:
         print_ai_comparison_table(recommendations, ai_insights)

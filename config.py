@@ -8,14 +8,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── OpenAlgo (market data — replaces Yahoo Finance) ───────────────────────────
-OPENALGO_API_KEY = os.getenv("OPENALGO_API_KEY", "")
-OPENALGO_HOST = os.getenv("OPENALGO_HOST", "http://127.0.0.1:5000")
-OPENALGO_USERNAME = os.getenv("OPENALGO_USERNAME", "")
-OPENALGO_EXCHANGE = os.getenv("OPENALGO_EXCHANGE", "NSE")
-# Broker API history vs OpenAlgo DuckDB — use "db" if your deploy stores dailies in Historify
-OPENALGO_HISTORY_SOURCE = os.getenv("OPENALGO_HISTORY_SOURCE", "api")
-
 # ── AI Provider Configuration ─────────────────────────────────────────────────
 # Options: "anthropic" | "openai"
 AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic").lower()
@@ -38,12 +30,6 @@ NIFTY_50 = [
     "TATASTEEL", "TECHM", "TITAN", "TRENT", "ULTRACEMCO",
     "WIPRO",
 ]
-
-# ── Broker holdings (python main.py --holdings) via OpenAlgo ────────────────
-# When true, merge open positions from positionbook() with demat holdings().
-HOLDINGS_INCLUDE_OPENALGO_POSITIONS = os.getenv(
-    "HOLDINGS_INCLUDE_OPENALGO_POSITIONS", "true"
-).lower() in ("1", "true", "yes")
 
 # ── News Source Configuration ─────────────────────────────────────────────────
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"

@@ -1,13 +1,13 @@
 """
-Fundamental-style scoring for Indian stocks using OpenAlgo quotes + daily history.
-(OpenAlgo does not expose full financial statements; we score from price, range, momentum, volume.)
+Fundamental-style scoring from daily history + latest quote (market data provider).
+Full financial statements are not used; scoring is price/range/momentum/volume based.
 """
 
 import pandas as pd
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from openalgo_data import fetch_daily_history, fetch_quote
+from market_data import fetch_daily_history, fetch_quote
 
 
 @dataclass
@@ -51,7 +51,7 @@ def _rating_from_score(score: float) -> str:
 def _compute_fundamental_score(data: FundamentalData) -> tuple[float, str]:
     """
     Score 0-100 from classic fundamentals when present.
-    With OpenAlgo-only data most fields are None; 52-week logic still applies.
+    With price-only data most fields are None; 52-week logic still applies.
     """
     score = 50.0
 
@@ -142,7 +142,7 @@ def _compute_fundamental_score(data: FundamentalData) -> tuple[float, str]:
     return round(score, 1), _rating_from_score(score)
 
 
-def _adjust_score_openalgo_context(
+def _adjust_score_from_price_momentum(
     score: float,
     hist: pd.DataFrame,
     quote: Optional[dict[str, Any]],
@@ -179,7 +179,7 @@ def _adjust_score_openalgo_context(
 
 
 def fetch_fundamentals(symbol: str) -> Optional[FundamentalData]:
-    """Build fundamental-style profile from OpenAlgo daily bars + quote."""
+    """Build fundamental-style profile from daily bars + quote (configured market data)."""
     hist = fetch_daily_history(symbol, days=420)
     if hist is None or len(hist) < 20:
         return None
@@ -228,7 +228,7 @@ def fetch_fundamentals(symbol: str) -> Optional[FundamentalData]:
         beta=None,
     )
     base_score, _ = _compute_fundamental_score(data)
-    adj = _adjust_score_openalgo_context(base_score, hist, quote)
+    adj = _adjust_score_from_price_momentum(base_score, hist, quote)
     data.score = round(adj, 1)
     data.rating = _rating_from_score(data.score)
     return data
