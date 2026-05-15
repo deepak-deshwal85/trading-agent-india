@@ -44,13 +44,9 @@ AI_PROVIDER = ""
 ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
 
-# Models — app.env defaults; .env may override ANTHROPIC_MODEL_DEEP / legacy ANTHROPIC_MODEL
+# Models — app.env defaults; .env may override *_DEEP / *_FAST if needed
 ANTHROPIC_MODEL_FAST = _env("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5")
-ANTHROPIC_MODEL_DEEP = (
-    _env("ANTHROPIC_MODEL_DEEP")
-    or _env("ANTHROPIC_MODEL")
-    or "claude-sonnet-4-6"
-)
+ANTHROPIC_MODEL_DEEP = _env("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
 OPENAI_MODEL_FAST = _env("OPENAI_MODEL_FAST", "gpt-4o-mini")
 OPENAI_MODEL_DEEP = (
     _env("OPENAI_MODEL_DEEP")
@@ -58,8 +54,7 @@ OPENAI_MODEL_DEEP = (
     or "gpt-4o"
 )
 
-# Back-compat aliases (deep tier)
-ANTHROPIC_MODEL = ANTHROPIC_MODEL_DEEP
+# Back-compat alias (deep tier, OpenAI only)
 OPENAI_MODEL = OPENAI_MODEL_DEEP
 
 AI_SENTIMENT_USE_LLM = _env_bool("AI_SENTIMENT_USE_LLM", True)
