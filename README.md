@@ -50,7 +50,7 @@ A comprehensive stock analysis tool for Indian markets (NSE/BSE) that aggregates
 ## Setup
 
 ### Prerequisites
-- Python 3.10+
+- Python 3.12+ (required by `pandas-ta` on PyPI)
 - Internet connection (news, market data, optional AI)
 - No broker API keys — prices via **yfinance** / **jugaad-data**
 - Anthropic and/or OpenAI API key (optional, for `--ai`)
@@ -255,7 +255,7 @@ This tool is for **educational and informational purposes only**. It does NOT co
 
 | Component | Technology |
 |-----------|-----------|
-| Language | Python 3.10+ |
+| Language | Python 3.12+ |
 | Stock Data | yfinance + jugaad-data (NSE) |
 | Technical Analysis | pandas_ta |
 | News Aggregation | feedparser, requests, BeautifulSoup |
