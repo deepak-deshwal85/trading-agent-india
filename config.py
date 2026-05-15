@@ -16,6 +16,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
+# ── Telegram (PDF delivery from GitHub Actions or scripts/send_telegram.py) ───
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_CAPTION = os.getenv("TELEGRAM_CAPTION", "").strip()
+
 # ── Nifty 50 Constituents (NSE Symbols) ──────────────────────────────────────
 NIFTY_50 = [
     "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",

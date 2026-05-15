@@ -1,15 +1,19 @@
-# Daily full run — Nifty 50, news + sentiment + fundamentals + technicals.
+# Daily full run — Nifty 50, news + sentiment + fundamentals + technicals + PDF → Telegram.
 # Market data: yfinance (primary) + jugaad-data (fallback). No broker API keys.
 #
 # Triggers: daily schedule (~08:00 IST), push to main/master, manual dispatch.
 # Schedule: GitHub `cron` is UTC. Default = 08:00 IST → 02:30 UTC.
 #
-# Optional secrets (Settings → Secrets and variables → Actions):
-#   MAIN_PY_ARGS — override default (e.g. "--ai --provider openai --pdf --pdf-file report.pdf")
+# Required secrets for Telegram delivery:
+#   TELEGRAM_BOT_TOKEN — from @BotFather
+#   TELEGRAM_CHAT_ID   — your chat id (message the bot, then use getUpdates)
+#
+# Optional secrets:
+#   TELEGRAM_CAPTION — custom caption on the PDF message
+#   MAIN_PY_ARGS — override python main.py args (include --pdf --pdf-file if you change paths)
 #   ANTHROPIC_API_KEY, OPENAI_API_KEY, AI_PROVIDER — only if MAIN_PY_ARGS includes --ai
 #
-# Default command: python main.py --drop-missing
-#   (same as local full run, but drops symbols with no price data so CI does not fail on one bad ticker)
+# Default: python main.py --drop-missing --pdf --pdf-file reports/market_report.pdf
 
 name: Daily market analysis
 
@@ -45,7 +49,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run main.py (full analysis)
+      - name: Run main.py (full analysis + PDF)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -53,9 +57,45 @@ jobs:
           MAIN_PY_ARGS: ${{ secrets.MAIN_PY_ARGS }}
         run: |
           set -e
+          mkdir -p reports
+          REPORT_PATH="reports/market_report.pdf"
+          echo "REPORT_PATH=${REPORT_PATH}" >> "${GITHUB_ENV}"
+
           if [ -n "${MAIN_PY_ARGS}" ]; then
             # shellcheck disable=SC2086
             python main.py ${MAIN_PY_ARGS}
           else
-            python main.py --drop-missing
+            python main.py --drop-missing --pdf --pdf-file "${REPORT_PATH}"
           fi
+
+          if [ ! -f "${REPORT_PATH}" ]; then
+            FOUND="$(find reports . -maxdepth 1 -name '*.pdf' -type f 2>/dev/null | head -1)"
+            if [ -n "${FOUND}" ]; then
+              REPORT_PATH="${FOUND}"
+              echo "REPORT_PATH=${REPORT_PATH}" >> "${GITHUB_ENV}"
+            else
+              echo "No PDF found at ${REPORT_PATH}. Add --pdf --pdf-file to MAIN_PY_ARGS."
+              exit 1
+            fi
+          fi
+
+      - name: Upload PDF artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-report-${{ github.run_id }}
+          path: reports/
+          retention-days: 14
+
+      - name: Send PDF to Telegram
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CAPTION: ${{ secrets.TELEGRAM_CAPTION }}
+          REPORT_PATH: ${{ env.REPORT_PATH }}
+        run: |
+          set -e
+          TS="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          CAPTION="${TELEGRAM_CAPTION:-Indian Market Advisory — ${TS}}"
+          python scripts/send_telegram.py --file "${REPORT_PATH}" --caption "${CAPTION}"

@@ -16,14 +16,22 @@ Usage:
 """
 
 import argparse
+import sys
 import time
 import os
 import csv
 from datetime import datetime
+from pathlib import Path
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from config import NIFTY_50, AI_PROVIDER
+from config import (
+    NIFTY_50,
+    AI_PROVIDER,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
+    TELEGRAM_CAPTION,
+)
 from market_data import check_market_data_auth, validate_symbols
 from news_fetcher import (
     fetch_all_market_news, fetch_world_news,
@@ -90,6 +98,11 @@ def parse_args():
         help="Output PDF file path (default: market_report.pdf).",
     )
     parser.add_argument(
+        "--no-telegram",
+        action="store_true",
+        help="Do not send the PDF to Telegram (default: send when TELEGRAM_* is set in .env).",
+    )
+    parser.add_argument(
         "--validate-symbols", action="store_true",
         help="Validate symbols (yfinance / jugaad-data) and exit (no analysis run).",
     )
@@ -102,6 +115,39 @@ def parse_args():
         help="Optional CSV path to save symbol validation result (status per symbol).",
     )
     return parser.parse_args()
+
+
+def _send_pdf_to_telegram(pdf_path: str) -> None:
+    """Send PDF via Telegram if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are in .env."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        console.print(
+            "[dim]Telegram: skipped — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env "
+            "to auto-send the PDF (or run: python scripts/send_telegram.py --file ...).[/dim]"
+        )
+        return
+
+    scripts_dir = Path(__file__).resolve().parent / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from send_telegram import send_document  # noqa: E402
+
+    caption = TELEGRAM_CAPTION or (
+        f"Indian Market Advisory — {datetime.now().strftime('%d %b %Y, %H:%M IST')}"
+    )
+    try:
+        send_document(
+            pdf_path,
+            token=TELEGRAM_BOT_TOKEN,
+            chat_id=TELEGRAM_CHAT_ID,
+            caption=caption,
+        )
+        console.print(f"[bold green]PDF sent to Telegram[/] (chat {TELEGRAM_CHAT_ID})")
+    except Exception as e:
+        console.print(f"[bold red]Telegram send failed:[/] {e}")
+        console.print(
+            "[dim]Fix .env credentials or run manually: "
+            f"python scripts/send_telegram.py --file {pdf_path}[/dim]"
+        )
 
 
 def main():
@@ -384,6 +430,8 @@ def main():
             market_overview=market_overview,
         )
         console.print(f"[bold green]PDF exported:[/] {pdf_path}")
+        if not args.no_telegram:
+            _send_pdf_to_telegram(pdf_path)
 
     # ── Timing ──
     elapsed = time.time() - start_time

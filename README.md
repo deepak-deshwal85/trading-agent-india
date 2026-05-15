@@ -117,14 +117,32 @@ python main.py --ai --detailed --pdf --pdf-file reports/market_report.pdf --stoc
 
 ## Production Run Commands
 
-### GitHub Actions (scheduled full run)
-The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs on **push to `main`/`master`**, **daily at ~08:00 IST**, and **manual dispatch**, with:
+### GitHub Actions (scheduled full run + Telegram PDF)
+The workflow [`.github/workflows/daily-analysis.yml`](.github/workflows/daily-analysis.yml) runs on **push to `main`/`master`**, **daily at ~08:00 IST**, and **manual dispatch**. Default command:
 
 ```bash
-python main.py --drop-missing
+python main.py --drop-missing --pdf --pdf-file reports/market_report.pdf
 ```
 
-That is a **full run**: all Nifty 50, news from all sources, sentiment, fundamentals, and technicals. `--drop-missing` only skips symbols with no price data (recommended on CI). Override via the `MAIN_PY_ARGS` secret, e.g. `--ai --provider openai --pdf --pdf-file report.pdf`.
+Then it **uploads the PDF** as a workflow artifact and **sends it to your Telegram bot**.
+
+**Required repo secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | How to get it |
+|--------|----------------|
+| `TELEGRAM_BOT_TOKEN` | Create a bot with [@BotFather](https://t.me/BotFather), copy the token |
+| `TELEGRAM_CHAT_ID` | Message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id":...}` |
+
+Optional: `TELEGRAM_CAPTION`, `MAIN_PY_ARGS` (must include `--pdf` if you change paths), AI keys for `--ai`.
+
+**Test Telegram locally:**
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "your-token"
+$env:TELEGRAM_CHAT_ID = "your-chat-id"
+python main.py --skip-news --stocks RELIANCE --pdf --pdf-file reports/test.pdf
+python scripts/send_telegram.py --file reports/test.pdf --caption "Test report"
+```
 
 ### Full Nifty50 run (AI + PDF, dated filename)
 **PowerShell**
